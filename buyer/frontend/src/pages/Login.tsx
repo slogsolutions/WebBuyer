@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import { GoogleLogin } from '@react-oauth/google';
-import { LockKeyhole } from 'lucide-react';
+import { LockKeyhole, Eye, EyeOff } from 'lucide-react';
 
 export default function Login() {
   const [formData, setFormData] = useState({
@@ -11,18 +11,46 @@ export default function Login() {
     password: '',
   });
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState<boolean>(false);
+
   const { login, googleLogin } = useAuth();
   const navigate = useNavigate();
+
+  // Prefill remembered email + checkbox on mount
+  useEffect(() => {
+    const remembered = localStorage.getItem('rememberMe') === 'true';
+    const rememberedEmail = localStorage.getItem('rememberedEmail') || '';
+    setRememberMe(remembered);
+    if (remembered && rememberedEmail) {
+      setFormData((prev) => ({ ...prev, email: rememberedEmail }));
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       await login(formData.email, formData.password);
+
+      // Persist preference + email locally
+      localStorage.setItem('rememberMe', String(rememberMe));
+      if (rememberMe) {
+        localStorage.setItem('rememberedEmail', formData.email);
+      } else {
+        localStorage.removeItem('rememberedEmail');
+      }
+
       toast.success('Login successful!');
       navigate('/', { replace: true });
     } catch (error: any) {
-      toast.error(error.message || 'Login failed');
+      const message =
+        error?.code === 'auth/invalid-credential' ||
+        error?.code === 'auth/wrong-password' ||
+        error?.code === 'auth/user-not-found'
+          ? 'Invalid email or password. Please try again.'
+          : error?.message || 'Login failed. Please check your details.';
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -31,10 +59,15 @@ export default function Login() {
   const handleGoogleSuccess = async (credentialResponse: any) => {
     try {
       await googleLogin(credentialResponse.credential);
+
+      // Keep same remember logic for Google (email often not exposed)
+      localStorage.setItem('rememberMe', String(rememberMe));
+      if (!rememberMe) localStorage.removeItem('rememberedEmail');
+
       toast.success('Google login successful!');
       navigate('/', { replace: true });
     } catch (error: any) {
-      toast.error(error.message || 'Google login failed');
+      toast.error(error?.message || 'Google login failed');
     }
   };
 
@@ -57,6 +90,7 @@ export default function Login() {
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-4 shadow-lg shadow-red-100/50 sm:rounded-xl sm:px-10 border border-red-100">
           <form className="space-y-6" onSubmit={handleSubmit}>
+            {/* Email */}
             <div>
               <label
                 htmlFor="email"
@@ -70,6 +104,7 @@ export default function Login() {
                   name="email"
                   type="email"
                   required
+                  autoComplete="email"
                   className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all duration-200"
                   value={formData.email}
                   onChange={(e) =>
@@ -80,6 +115,7 @@ export default function Login() {
               </div>
             </div>
 
+            {/* Password */}
             <div>
               <label
                 htmlFor="password"
@@ -87,23 +123,48 @@ export default function Login() {
               >
                 Password
               </label>
-              <div className="mt-1">
+              <div className="mt-1 relative">
                 <input
                   id="password"
                   name="password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
-                  className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all duration-200"
+                  autoComplete="current-password"
+                  className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all duration-200 pr-10"
                   value={formData.password}
                   onChange={(e) =>
                     setFormData({ ...formData, password: e.target.value })
                   }
                   placeholder="Enter your password"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-gray-700"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-5 w-5" />
+                  ) : (
+                    <Eye className="h-5 w-5" />
+                  )}
+                </button>
               </div>
             </div>
 
+            {/* Remember Me + Forgot Password */}
             <div className="flex items-center justify-between">
+              <label className="flex items-center space-x-2 text-sm text-gray-700 select-none">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                />
+                <span>Remember me</span>
+              </label>
+
               <div className="text-sm">
                 <Link
                   to="/forgot-password"
@@ -114,6 +175,7 @@ export default function Login() {
               </div>
             </div>
 
+            {/* Submit */}
             <div>
               <button
                 type="submit"
@@ -125,6 +187,7 @@ export default function Login() {
             </div>
           </form>
 
+          {/* Divider */}
           <div className="mt-6">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
@@ -137,18 +200,16 @@ export default function Login() {
               </div>
             </div>
 
-            <div className="mt-6">
-              <div className="flex justify-center">
-                <GoogleLogin
-                  onSuccess={handleGoogleSuccess}
-                  onError={() => toast.error('Google login failed')}
-                />
-              </div>
+            <div className="mt-6 flex justify-center">
+              <GoogleLogin
+                onSuccess={handleGoogleSuccess}
+                onError={() => toast.error('Google login failed')}
+              />
             </div>
           </div>
 
           <p className="mt-6 text-center text-sm text-gray-600">
-            Don't have an account?{' '}
+            Don’t have an account?{' '}
             <Link
               to="/register"
               className="font-medium text-red-600 hover:text-red-500 transition-colors duration-200"
@@ -158,6 +219,6 @@ export default function Login() {
           </p>
         </div>
       </div>
-    </div>
-  );
+    </div>
+  );
 }
