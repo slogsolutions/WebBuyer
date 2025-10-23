@@ -243,13 +243,13 @@ export default function KYC() {
       return (
         <div className="mt-8 text-center bg-green-50 border-l-4 border-red-400 text-red-700 p-4">
           <h3 className="text-xl font-semibold">KYC Approved</h3>
-          <p>Your KYC has been approved! You can now register your location.</p>
-          <button
+          <p>Your KYC has been approved!</p>
+          {/* <button
             onClick={() => navigate('/register-parking')}
             className="mt-4 bg-gradient-to-r from-red-500 to-red-500 text-white px-6 py-2 rounded-lg shadow-lg hover:shadow-xl transform transition-transform hover:scale-105"
           >
             Register Location
-          </button>
+          </button> */}
         </div>
       );
     }
