@@ -1,4 +1,4 @@
-// models/ParkingSpace.js
+// backend/models/ParkingSpace.js
 import mongoose from "mongoose";
 
 const parkingSpaceSchema = new mongoose.Schema({
@@ -7,7 +7,6 @@ const parkingSpaceSchema = new mongoose.Schema({
     ref: "ParkFinderSecondUser",
     required: true,
   },
-  // backend/models/ParkingSpace.js
   approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'ParkFinderSecondUser' },
   approvedAt: { type: Date },
 
@@ -99,6 +98,9 @@ const parkingSpaceSchema = new mongoose.Schema({
     type: Number,
   },
   photos: [{
+    type: String
+  }],
+  cloudinaryPublicIds: [{  // Added for Cloudinary deletion support
     type: String
   }],
   rating: {

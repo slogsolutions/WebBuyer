@@ -1,8 +1,10 @@
 // src/components/parking/ParkingSpaceList.tsx
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ParkingSpace } from '../../types/parking';
 import {
   FaStar,
+  FaStarHalfAlt,
+  FaRegStar,
   FaMapMarkerAlt,
   FaClock,
   FaShieldAlt,
@@ -14,12 +16,13 @@ import {
   FaSearch,
   FaRoad,
 } from 'react-icons/fa';
+import axios from 'axios';
 
 interface ParkingSpaceListProps {
   spaces: ParkingSpace[];
   onSpaceSelect: (space: ParkingSpace) => void;
-  searchRadius?: number; // optional
-  onRadiusChange?: (radius: number) => void; // optional
+  searchRadius?: number;
+  onRadiusChange?: (radius: number) => void;
   userLocation: { lat: number; lng: number };
   filters: {
     amenities: { [key: string]: boolean };
@@ -29,10 +32,10 @@ interface ParkingSpaceListProps {
   endTime?: string | null;
 }
 
-// Haversine formula to calculate distance
+// Haversine formula for distance
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
-  const R = 6371; // km
+  const toRadians = (deg: number) => (deg * Math.PI) / 180;
+  const R = 6371;
   const dLat = toRadians(lat2 - lat1);
   const dLon = toRadians(lon2 - lon1);
   const a =
@@ -60,14 +63,11 @@ const getAmenityIcon = (amenity: string) => {
   };
 
   for (const [key, icon] of Object.entries(amenityIcons)) {
-    if (amenityLower.includes(key)) {
-      return icon;
-    }
+    if (amenityLower.includes(key)) return icon;
   }
   return FaCar;
 };
 
-// Format a number as INR currency
 const formatINR = (value: number, showCents = false) =>
   new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -75,31 +75,17 @@ const formatINR = (value: number, showCents = false) =>
     maximumFractionDigits: showCents ? 2 : 0,
   }).format(value);
 
-// Compute price metadata (base, discountPercent, discountedPrice, hasDiscount)
 const computePriceMeta = (space: any) => {
   const baseRaw = space?.priceParking ?? space?.price ?? 0;
   const base = Number(baseRaw) || 0;
-
   let rawDiscount = space?.discount ?? space?.discountPercent ?? space?.discount_percentage ?? 0;
-
-  if (typeof rawDiscount === 'string') {
-    rawDiscount = rawDiscount.replace?.('%', '') ?? rawDiscount;
-  }
-  if (typeof rawDiscount === 'object' && rawDiscount !== null) {
-    rawDiscount = rawDiscount.percent ?? rawDiscount.value ?? rawDiscount.amount ?? 0;
-  }
-
+  if (typeof rawDiscount === 'string') rawDiscount = rawDiscount.replace('%', '');
+  if (typeof rawDiscount === 'object' && rawDiscount !== null) rawDiscount = rawDiscount.percent ?? rawDiscount.value ?? rawDiscount.amount ?? 0;
   const discountNum = Number(rawDiscount);
   const discountPercent = Number.isFinite(discountNum) ? Math.max(0, Math.min(100, discountNum)) : 0;
   const discountedPrice = +(base * (1 - discountPercent / 100)).toFixed(2);
   const hasDiscount = discountPercent > 0 && discountedPrice < base;
-
-  return {
-    basePrice: +base.toFixed(2),
-    discountPercent,
-    discountedPrice,
-    hasDiscount,
-  };
+  return { basePrice: +base.toFixed(2), discountPercent, discountedPrice, hasDiscount };
 };
 
 function computeDurationHours(start?: string | null, end?: string | null): number | null {
@@ -107,8 +93,7 @@ function computeDurationHours(start?: string | null, end?: string | null): numbe
   const s = new Date(start);
   const e = new Date(end);
   if (isNaN(s.getTime()) || isNaN(e.getTime()) || e <= s) return null;
-  const minutes = (e.getTime() - s.getTime()) / (1000 * 60);
-  return +(minutes / 60); // fractional hours (e.g., 1.5)
+  return (e.getTime() - s.getTime()) / (1000 * 60 * 60);
 }
 
 function formatDurationReadable(hours: number) {
@@ -121,6 +106,20 @@ function formatDurationReadable(hours: number) {
   return `${m}m`;
 }
 
+// render stars with possible half star
+const renderStars = (value: number, sizeClass = 'text-xs') => {
+  const safe = Number.isFinite(value) ? value : 0;
+  const rounded = Math.round(safe * 2) / 2;
+  const full = Math.floor(rounded);
+  const hasHalf = rounded - full >= 0.5;
+  const empty = 5 - full - (hasHalf ? 1 : 0);
+  const nodes: React.ReactNode[] = [];
+  for (let i = 0; i < full; i++) nodes.push(<FaStar key={`f-${i}`} className={`${sizeClass} text-yellow-400 mr-1`} />);
+  if (hasHalf) nodes.push(<FaStarHalfAlt key="half" className={`${sizeClass} text-yellow-400 mr-1`} />);
+  for (let i = 0; i < empty; i++) nodes.push(<FaRegStar key={`e-${i}`} className={`${sizeClass} text-gray-300 mr-1`} />);
+  return <div className="flex items-center">{nodes}</div>;
+};
+
 export default function ParkingSpaceList({
   spaces,
   onSpaceSelect,
@@ -130,31 +129,154 @@ export default function ParkingSpaceList({
   startTime,
   endTime,
 }: ParkingSpaceListProps) {
+  // store avg + count results keyed by parking space id
+  const [ratingsMap, setRatingsMap] = useState<Record<string, { avg: number; count: number }>>({});
+
+  // robust fetch: tries many response shapes and a fallback to /api/parking/:id
+  useEffect(() => {
+    if (!Array.isArray(spaces) || spaces.length === 0) {
+      setRatingsMap({});
+      return;
+    }
+
+    let mounted = true;
+    const token = localStorage.getItem('token') || '';
+    const base = import.meta.env.VITE_BASE_URL || '';
+
+    // helper: get string id from _id or id
+    const idOf = (s: any) => {
+      if (!s) return null;
+      if (s._id && typeof s._id === 'object' && s._id.toString) return s._id.toString();
+      if (s._id) return String(s._id);
+      if (s.id && typeof s.id === 'object' && s.id.toString) return s.id.toString();
+      if (s.id) return String(s.id);
+      return null;
+    };
+
+    // prepare ids to fetch (we'll still include ones that already have rating to keep map consistent)
+    const ids = spaces
+      .map((s: any) => idOf(s))
+      .filter(Boolean) as string[];
+
+    // fetch one id and parse various response formats
+    const fetchRatingFor = async (id: string) => {
+      try {
+        // primary call to ratings endpoint
+        const r = await axios.get(`${base}/api/ratings/parking/${id}`, {
+          headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+        });
+        const data = r?.data ?? {};
+
+        // 1) { stats: { avg, count } }
+        if (data?.stats && (typeof data.stats.avg === 'number' || typeof data.stats.count === 'number')) {
+          return { id, avg: Number(data.stats.avg) || 0, count: Number(data.stats.count) || 0 };
+        }
+
+        // 2) direct fields: avg, average, mean, avgScore
+        const directAvgCandidates = [
+          data?.avg,
+          data?.average,
+          data?.avgScore,
+          data?.averageScore,
+          data?.mean,
+          data?.rating,
+          data?.average_rating,
+        ];
+        const foundDirectAvg = directAvgCandidates.find((v) => typeof v === 'number');
+        if (typeof foundDirectAvg === 'number') {
+          const count = typeof data.count === 'number' ? data.count : typeof data?.ratings?.length === 'number' ? data.ratings.length : 0;
+          return { id, avg: Number(foundDirectAvg), count };
+        }
+
+        // 3) ratings array present -> compute average
+        const ratingsArray: any[] = Array.isArray(data) ? data : Array.isArray(data?.ratings) ? data.ratings : [];
+        if (ratingsArray.length > 0) {
+          const sum = ratingsArray.reduce((s, it) => s + (Number(it.score) || 0), 0);
+          const avg = sum / ratingsArray.length;
+          return { id, avg, count: ratingsArray.length };
+        }
+
+        // 4) diagnostics sampleDocs maybe present (debug format)
+        if (Array.isArray(data?.diagnostics?.sampleDocs) && data.diagnostics.sampleDocs.length > 0) {
+          const sample = data.diagnostics.sampleDocs.filter((d: any) => String(d.parkingSpace) === id);
+          if (sample.length > 0) {
+            const sum = sample.reduce((s: number, it: any) => s + (Number(it.score) || 0), 0);
+            return { id, avg: sum / sample.length, count: sample.length };
+          }
+        }
+
+        // 5) fallback: try reading /api/parking/:id (some implementations store avg on parking object)
+        try {
+          const p = await axios.get(`${base}/api/parking/${id}`, {
+            headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+          });
+          const pd = p?.data ?? {};
+          if (typeof pd.rating === 'number' || typeof pd.avg === 'number' || typeof pd.avgRating === 'number') {
+            const avg = pd.rating ?? pd.avg ?? pd.avgRating ?? 0;
+            const count = pd.ratingCount ?? pd.ratingsCount ?? 0;
+            return { id, avg: Number(avg) || 0, count: Number(count) || 0 };
+          }
+        } catch (e) {
+          // ignore; fallback below
+        }
+
+        // nothing found
+        return { id, avg: 0, count: 0 };
+      } catch (err) {
+        console.error(`rating fetch failed for ${id}`, err?.response?.data ?? err.message ?? err);
+        return { id, avg: 0, count: 0 };
+      }
+    };
+
+    (async () => {
+      const results = await Promise.all(ids.map((id) => fetchRatingFor(id)));
+      if (!mounted) return;
+      const map: Record<string, { avg: number; count: number }> = {};
+      results.forEach((r) => {
+        if (r && r.id) map[r.id] = { avg: r.avg, count: r.count };
+      });
+
+      // also include any spaces that already had rating fields (avoid overwriting)
+      spaces.forEach((s: any) => {
+        const id = idOf(s);
+        if (!id) return;
+        if (map[id]) return; // already set from results
+        const preAvg =
+          typeof s.rating === 'number'
+            ? s.rating
+            : typeof s.avg === 'number'
+            ? s.avg
+            : typeof s.avgRating === 'number'
+            ? s.avgRating
+            : 0;
+        const preCount = typeof s.ratingCount === 'number' ? s.ratingCount : typeof s.count === 'number' ? s.count : 0;
+        map[id] = { avg: preAvg, count: preCount };
+      });
+
+      if (mounted) setRatingsMap(map);
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [spaces]);
+
+  // Filter & attach distance (keeps your existing filtering logic)
   const filteredSpaces = spaces.filter((space: any) => {
-    // Calculate & attach distance (so parent or UI can reuse)
-    const distance = calculateDistance(
-      userLocation.lat,
-      userLocation.lng,
-      space.location.coordinates[1],
-      space.location.coordinates[0]
-    );
+    const coords = space?.location?.coordinates ?? [0, 0];
+    const distance = calculateDistance(userLocation.lat, userLocation.lng, coords[1] ?? 0, coords[0] ?? 0);
     (space as any).distance = distance;
 
-    // Check amenities
+    // amenities
     for (const [key, value] of Object.entries(filters.amenities)) {
-      if (
-        value &&
-        !space.amenities?.some((amenity: string) => amenity?.toLowerCase?.().includes(key.toLowerCase()))
-      ) {
+      if (value && !space.amenities?.some((amenity: string) => amenity?.toLowerCase?.().includes(key.toLowerCase()))) {
         return false;
       }
     }
 
-    // Price range filter (use pre-discount price to avoid surprises)
+    // price range
     const price = Number(space.priceParking ?? space.price ?? 0);
-    if (price < filters.priceRange[0] || price > filters.priceRange[1]) {
-      return false;
-    }
+    if (price < filters.priceRange[0] || price > filters.priceRange[1]) return false;
 
     return true;
   });
@@ -167,9 +289,6 @@ export default function ParkingSpaceList({
         </div>
         <h3 className="text-lg font-bold text-gray-700 mb-1">No parking spaces found</h3>
         <p className="text-gray-500 text-sm mb-3 max-w-xs">Try adjusting your filters or search radius</p>
-        <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border border-yellow-200 rounded-lg p-2 max-w-xs">
-          <p className="text-yellow-700 text-xs">💡 Try increasing search radius or removing filters</p>
-        </div>
       </div>
     );
   }
@@ -182,25 +301,16 @@ export default function ParkingSpaceList({
       {filteredSpaces.map((space: any) => {
         const address: any = space.address || {};
         const amenities = Array.isArray(space.amenities) ? space.amenities : [];
-        const rating = typeof space.rating === 'number' ? space.rating : 0;
 
-        // Prefer time-window availability when filter is active; else show total capacity-ish.
-        const timeWindowAvail =
-          typeof space.availableSpots === 'number' && !Number.isNaN(space.availableSpots)
-            ? space.availableSpots
-            : undefined;
+        // get id and mapped rating
+        const id =
+          space?._id && typeof space._id === 'object' && space._id.toString ? space._id.toString() : String(space._id ?? '');
+        const mapped = ratingsMap[id];
+        const ratingVal = mapped?.avg ?? (typeof space.rating === 'number' ? space.rating : typeof space.avg === 'number' ? space.avg : 0);
+        const ratingCount = mapped?.count ?? (typeof space.ratingCount === 'number' ? space.ratingCount : 0);
 
-        const totalCapacity =
-          Number(
-            space.totalSpots ??
-              space.total_slots ??
-              space.capacity ??
-              space.slotCount ??
-              // as a last fallback use availableSpots if it's actually a static "total" in some schemas
-              space.availableSpots ??
-              0
-          ) || 0;
-
+        const timeWindowAvail = typeof space.availableSpots === 'number' ? space.availableSpots : undefined;
+        const totalCapacity = Number(space.totalSpots ?? space.total_slots ?? space.capacity ?? 0) || 0;
         const shownAvailability = timeFilterActive ? (timeWindowAvail ?? 0) : totalCapacity;
 
         const priceMeta = (space as any).__price ?? computePriceMeta(space);
@@ -208,15 +318,11 @@ export default function ParkingSpaceList({
         const discountedPrice = priceMeta.discountedPrice;
         const hasDiscount = priceMeta.hasDiscount;
         const discountPercent = priceMeta.discountPercent;
-
         const perHour = hasDiscount ? discountedPrice : basePrice;
         const totalAmount = durationHours ? +(perHour * durationHours).toFixed(2) : null;
         const durationReadable = durationHours ? formatDurationReadable(durationHours) : null;
 
-        const key =
-          typeof space._id === 'object' && (space._id as any)?.toString
-            ? (space._id as any).toString()
-            : (space._id as string);
+        const key = id || `${Math.random()}`;
 
         return (
           <div
@@ -257,12 +363,17 @@ export default function ParkingSpaceList({
                     </div>
                   )}
 
-                  {rating > 0 && (
-                    <div className="flex items-center justify-end mt-1">
-                      <FaStar className="text-yellow-400 text-xs mr-1" />
-                      <span className="text-xs font-semibold text-gray-700">{rating.toFixed(1)}</span>
-                    </div>
-                  )}
+                  <div className="flex items-center justify-end mt-1">
+                    {ratingVal > 0 ? (
+                      <div className="flex items-center">
+                        <div className="mr-2">{renderStars(ratingVal, 'text-xs')}</div>
+                        <div className="text-xs font-semibold text-gray-700">{Number(ratingVal).toFixed(1)}</div>
+                        {ratingCount ? <div className="text-xs text-gray-400 ml-1">({ratingCount})</div> : null}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-gray-400">No ratings</div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -278,8 +389,7 @@ export default function ParkingSpaceList({
                     timeFilterActive ? 'text-green-600 bg-green-50' : 'text-gray-600 bg-gray-100'
                   }`}
                 >
-                  {shownAvailability} spot{shownAvailability !== 1 ? 's' : ''}{' '}
-                  {timeFilterActive ? 'available for your time' : 'total'}
+                  {shownAvailability} spot{shownAvailability !== 1 ? 's' : ''} {timeFilterActive ? 'available for your time' : 'total'}
                 </div>
               </div>
 
@@ -309,7 +419,7 @@ export default function ParkingSpaceList({
                 </div>
               )}
 
-              {/* Pricing block: show total amount if time period selected, else show per-hour */}
+              {/* Pricing */}
               <div className="mb-2">
                 {durationHours && totalAmount ? (
                   <div className="flex items-center justify-between">
@@ -345,13 +455,11 @@ export default function ParkingSpaceList({
               </div>
             </div>
 
-            {/* Hover Effect Border */}
             <div className="absolute inset-0 border-2 border-transparent group-hover:border-blue-300 rounded-xl pointer-events-none transition-all duration-300"></div>
           </div>
         );
       })}
 
-      {/* Custom Scrollbar Styling */}
       <style jsx>{`
         .max-h-64::-webkit-scrollbar {
           width: 6px;
@@ -371,3 +479,6 @@ export default function ParkingSpaceList({
     </div>
   );
 }
+
+
+
