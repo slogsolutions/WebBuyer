@@ -1,3 +1,4 @@
+// frontend/src/components/map/ParkingPopup.tsx
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Popup } from 'react-map-gl';
@@ -68,46 +69,74 @@ export default function ParkingPopup({
   const [showShareMenu, setShowShareMenu] = useState(false);
 
   const API_BASE = import.meta.env.VITE_BASE_URL?.replace(/\/$/, '') || window.location.origin;
-  const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME?.trim();
+  const CLOUD_NAME = (import.meta.env.VITE_CLOUDINARY_CLOUD_NAME ?? '').toString().trim();
 
-  // Fetch ratings + reviews
+  // Clear stale UI state immediately when space changes
   useEffect(() => {
+    setRatingAvg(Number(space?.rating ?? 0));
+    setRatingCount(0);
+    setReviews([]);
+    setCurrentImageIndex(0);
+    setIsImageLoaded(false);
+  }, [space?._id]);
+
+  // Fetch ratings + reviews with AbortController to avoid race/stale updates
+  useEffect(() => {
+    if (!space?._id) {
+      setRatingAvg(Number(space?.rating ?? 0));
+      setRatingCount(0);
+      setReviews([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    const spaceId = String(space._id);
+
     const fetchRatings = async () => {
-      if (!space?._id) return;
       try {
-        const res = await axios.get(`${API_BASE}/api/ratings/parking/${space._id}`, {
+        const res = await axios.get(`${API_BASE}/api/ratings/parking/${spaceId}`, {
           headers: {
             Accept: 'application/json',
             Authorization: `Bearer ${localStorage.getItem('token')}`,
           },
+          signal: controller.signal,
         });
+
+        if (controller.signal.aborted) return;
 
         const data = res.data;
 
+        // Normalize different response shapes
+        let ratingsArray: any[] = [];
+        if (Array.isArray(data)) ratingsArray = data;
+        else if (Array.isArray(data?.ratings)) ratingsArray = data.ratings;
+        else ratingsArray = [];
+
+        // Use server-provided stats if available
         if (data?.stats && (typeof data.stats.avg === 'number' || typeof data.stats.count === 'number')) {
           setRatingAvg(Number(data.stats.avg ?? 0));
           setRatingCount(Number(data.stats.count ?? 0));
+        } else if (ratingsArray.length > 0) {
+          const sum = ratingsArray.reduce((s: number, r: any) => s + (Number(r.score) || 0), 0);
+          setRatingAvg(sum / Math.max(1, ratingsArray.length));
+          setRatingCount(ratingsArray.length);
+        } else {
+          setRatingAvg(Number(space?.rating ?? 0));
+          setRatingCount(0);
         }
 
-        const ratingsArray: any[] = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.ratings)
-          ? data.ratings
-          : [];
-
         if (ratingsArray.length > 0) {
-          if (!data?.stats) {
-            const sum = ratingsArray.reduce((s: number, r: any) => s + (Number(r.score) || 0), 0);
-            setRatingAvg(sum / ratingsArray.length);
-            setRatingCount(ratingsArray.length);
-          }
-
           const normalized = ratingsArray
             .map((r) => ({
               _id: r._id,
               score: Number(r.score || 0),
               comment: r.comment || '',
-              fromUser: r.fromUser || r.fromUserName || null,
+              fromUser:
+                typeof r.fromUser === 'string'
+                  ? r.fromUser
+                  : r.fromUser && typeof r.fromUser === 'object'
+                  ? { name: r.fromUser.name || r.fromUser.fullName || r.fromUser.email || 'Anonymous', _id: r.fromUser._id }
+                  : null,
               createdAt: r.createdAt,
             }))
             .sort((a, b) => {
@@ -116,21 +145,27 @@ export default function ParkingPopup({
               return tb - ta;
             });
 
-          setReviews(normalized);
-        } else {
-          if (!data?.stats && (!data || (!Array.isArray(data) && !data.ratings))) {
-            setRatingAvg(Number(space?.rating ?? 0));
-            setRatingCount(0);
+          if (spaceId === String(space._id) && !controller.signal.aborted) {
+            setReviews(normalized);
           }
+        } else {
+          setReviews([]);
         }
-      } catch (err) {
-        console.warn('Failed to load ratings:', err);
+      } catch (err: any) {
+        if (controller.signal.aborted) return;
+        console.warn('Failed to load ratings:', err?.message ?? err);
         setRatingAvg(Number(space?.rating ?? 0));
         setRatingCount(0);
+        setReviews([]);
       }
     };
 
     fetchRatings();
+
+    return () => {
+      controller.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [space?._id]);
 
   const fmt = (value: number, decimals = 2) =>
@@ -264,7 +299,7 @@ export default function ParkingPopup({
     return stars;
   };
 
-  const topComments = reviews.slice(0, 1);
+  const topComments = reviews.slice(0, 2);
 
   return (
     <>
@@ -394,9 +429,7 @@ export default function ParkingPopup({
 
           {/* Compact Image Header */}
           <div className="relative h-24 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 overflow-hidden">
-            {!isImageLoaded && (
-              <div className="absolute inset-0 skeleton"></div>
-            )}
+            {!isImageLoaded && <div className="absolute inset-0 skeleton"></div>}
             <img
               src={images[currentImageIndex]}
               alt={(space as any).title || 'Parking space'}
@@ -422,16 +455,14 @@ export default function ParkingPopup({
                 >
                   <FaChevronRight className="text-[8px]" />
                 </button>
-                
+
                 {/* Image Indicators */}
                 <div className="absolute bottom-1.5 left-1/2 transform -translate-x-1/2 flex gap-1">
                   {images.map((_, idx) => (
                     <div
                       key={idx}
                       className={`h-1 rounded-full transition-all duration-300 ${
-                        idx === currentImageIndex
-                          ? 'w-4 bg-white shadow-md'
-                          : 'w-1 bg-white/50 hover:bg-white/75'
+                        idx === currentImageIndex ? 'w-4 bg-white shadow-md' : 'w-1 bg-white/50 hover:bg-white/75'
                       }`}
                     ></div>
                   ))}
@@ -448,11 +479,7 @@ export default function ParkingPopup({
               <div className="text-[10px] text-gray-900 font-bold">
                 {Number.isFinite(ratingAvg) ? ratingAvg.toFixed(1) : '0.0'}
               </div>
-              {ratingCount > 0 && (
-                <div className="text-[9px] text-gray-600 font-medium">
-                  ({ratingCount})
-                </div>
-              )}
+              {ratingCount > 0 && <div className="text-[9px] text-gray-600 font-medium">({ratingCount})</div>}
             </div>
 
             {/* Price Badge */}
@@ -497,9 +524,7 @@ export default function ParkingPopup({
             {/* Description */}
             {(space as any).description && (
               <div className="mb-2 p-2 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-100">
-                <p className="text-gray-700 text-[10px] leading-relaxed line-clamp-2">
-                  {(space as any).description}
-                </p>
+                <p className="text-gray-700 text-[10px] leading-relaxed line-clamp-2">{(space as any).description}</p>
               </div>
             )}
 
@@ -514,10 +539,7 @@ export default function ParkingPopup({
                     <span className="text-[10px] font-bold text-gray-800">Recent Reviews</span>
                   </div>
                   {reviews.length > 1 && (
-                    <button
-                      onClick={() => setShowReviewsModal(true)}
-                      className="text-[9px] font-semibold text-indigo-600 hover:text-indigo-700 transition-colors"
-                    >
+                    <button onClick={() => setShowReviewsModal(true)} className="text-[9px] font-semibold text-indigo-600 hover:text-indigo-700 transition-colors">
                       View all ({reviews.length})
                     </button>
                   )}
@@ -525,10 +547,7 @@ export default function ParkingPopup({
 
                 <div className="space-y-1.5">
                   {topComments.map((rev, idx) => (
-                    <div
-                      key={rev._id ?? idx}
-                      className="review-card p-2 bg-white rounded-lg shadow-sm border border-gray-100"
-                    >
+                    <div key={rev._id ?? idx} className="review-card p-2 bg-white rounded-lg shadow-sm border border-gray-100">
                       <div className="flex items-start gap-2">
                         <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center flex-shrink-0 shadow-sm">
                           <FaUserCircle className="text-white text-sm" />
@@ -536,9 +555,7 @@ export default function ParkingPopup({
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between mb-0.5">
                             <div className="font-semibold text-gray-900 text-[10px] truncate">
-                              {typeof rev.fromUser === 'string'
-                                ? rev.fromUser
-                                : rev.fromUser?.name || 'Anonymous'}
+                              {typeof rev.fromUser === 'string' ? rev.fromUser : rev.fromUser?.name || 'Anonymous'}
                             </div>
                             <div className="flex items-center gap-0.5 text-[8px] ml-1.5 flex-shrink-0">
                               {getStars(rev.score ?? 0)}
@@ -568,7 +585,7 @@ export default function ParkingPopup({
               className="w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:via-purple-700 hover:to-pink-700 text-white py-2 px-3 rounded-xl font-bold text-xs shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-between group relative overflow-hidden hover-lift"
             >
               <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
-              
+
               <div className="flex items-center gap-2 relative z-10">
                 <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center">
                   <FaCheck className="text-[9px]" />
@@ -576,9 +593,7 @@ export default function ParkingPopup({
                 <div className="text-left">
                   <div className="font-bold text-[11px]">Book Now</div>
                   {durationHours && totalAmount ? (
-                    <div className="text-[8px] opacity-90 font-medium">
-                      {Math.round(durationHours * 60) / 60}h
-                    </div>
+                    <div className="text-[8px] opacity-90 font-medium">{Math.round(durationHours * 60) / 60}h</div>
                   ) : (
                     <div className="text-[8px] opacity-90 font-medium">Instant</div>
                   )}
@@ -586,12 +601,8 @@ export default function ParkingPopup({
               </div>
 
               <div className="relative z-10">
-                <div className="text-sm font-black">
-                  {durationHours && totalAmount ? fmt(totalAmount, 0) : fmt(perHour, 0)}
-                </div>
-                {!durationHours && (
-                  <div className="text-[8px] opacity-90 font-medium">/hr</div>
-                )}
+                <div className="text-sm font-black">{durationHours && totalAmount ? fmt(totalAmount, 0) : fmt(perHour, 0)}</div>
+                {!durationHours && <div className="text-[8px] opacity-90 font-medium">/hr</div>}
               </div>
             </button>
           </div>
@@ -628,16 +639,12 @@ export default function ParkingPopup({
                   <div className="text-5xl font-black bg-gradient-to-r from-yellow-500 to-orange-500 bg-clip-text text-transparent">
                     {Number.isFinite(ratingAvg) ? ratingAvg.toFixed(1) : '0.0'}
                   </div>
-                  <div className="flex items-center justify-center gap-1 mt-2">
-                    {getStars(ratingAvg)}
-                  </div>
+                  <div className="flex items-center justify-center gap-1 mt-2">{getStars(ratingAvg)}</div>
                   <div className="text-xs text-gray-600 mt-1 font-medium">{ratingCount} ratings</div>
                 </div>
                 <div className="flex-1 text-sm text-gray-700">
                   <div className="font-semibold mb-1">Customer Satisfaction</div>
-                  <div className="text-xs text-gray-600">
-                    Based on verified bookings and reviews
-                  </div>
+                  <div className="text-xs text-gray-600">Based on verified bookings and reviews</div>
                 </div>
               </div>
             </div>
@@ -666,16 +673,16 @@ export default function ParkingPopup({
                             {typeof r.fromUser === 'string' ? r.fromUser : r.fromUser?.name ?? 'Anonymous'}
                           </div>
                           <div className="text-xs text-gray-500 mt-0.5">
-                            {r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-US', {
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric'
-                            }) : ''}
+                            {r.createdAt
+                              ? new Date(r.createdAt).toLocaleDateString('en-US', {
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric',
+                                })
+                              : ''}
                           </div>
                         </div>
-                        <div className="flex items-center gap-1 text-sm flex-shrink-0 ml-3">
-                          {getStars(r.score ?? 0)}
-                        </div>
+                        <div className="flex items-center gap-1 text-sm flex-shrink-0 ml-3">{getStars(r.score ?? 0)}</div>
                       </div>
                       <div className="text-sm text-gray-700 leading-relaxed">
                         {r.comment || <span className="italic text-gray-400">No comment provided</span>}
