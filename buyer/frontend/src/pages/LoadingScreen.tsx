@@ -14,13 +14,75 @@ const Loader: React.FC<LoaderProps> = ({ duration = 4 }) => {
     <StyledWrapper style={{ ['--drive-duration' as any]: `${duration}s` }}>
       <div className="loader">
         <div className="scene">
-          {/* Yellow Car from HTML */}
+          {/* Luxury Red Car (inline SVG used so the car always displays reliably) */}
           <div className="carContainer">
-            <div className="yellowCar">
-              <img src="https://i.imgur.com/n947rWL.png" alt="Yellow Car" className="carBody" />
-              <div className="wheels">
-                <img src="https://i.imgur.com/uZh01my.png" alt="Wheel" className="frontWheel" />
-                <img src="https://i.imgur.com/uZh01my.png" alt="Wheel" className="backWheel" />
+            <div className="redCar">
+              {/* Inline SVG of a simplified luxury sports car silhouette (red) — always renders */}
+              <svg
+                className="carBody"
+                viewBox="0 0 800 300"
+                xmlns="http://www.w3.org/2000/svg"
+                preserveAspectRatio="xMidYMid meet"
+                aria-hidden="true"
+              >
+                <defs>
+                  <linearGradient id="redGrad" x1="0" x2="1" y1="0" y2="1">
+                    <stop offset="0" stopColor="#ff2d2d" />
+                    <stop offset="1" stopColor="#b30000" />
+                  </linearGradient>
+                  <filter id="carGloss" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="8" result="b"/>
+                    <feBlend in="SourceGraphic" in2="b" mode="screen" />
+                  </filter>
+                </defs>
+
+                {/* car body */}
+                <g transform="translate(0,10)">
+                  <path
+                    d="M40 200 C60 160, 140 110, 240 110 L520 110 C600 110, 700 160, 760 200 L760 230 L40 230 Z"
+                    fill="url(#redGrad)"
+                    stroke="#7a0000"
+                    strokeWidth="3"
+                    filter="url(#carGloss)"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {/* cabin */}
+                  <path
+                    d="M260 110 C300 70, 420 70, 470 110 L520 110 L480 150 L300 150 Z"
+                    fill="#ff6b6b"
+                    opacity="0.95"
+                  />
+                  {/* windows */}
+                  <path d="M285 115 C310 95, 395 95, 425 115 L420 140 L295 140 Z" fill="#0b1220" opacity="0.6" />
+                  {/* front bumper highlight */}
+                  <path d="M520 110 C580 120, 640 145, 720 170" stroke="#ffb3b3" strokeWidth="2" fill="none" opacity="0.3" />
+                  {/* small detail lines */}
+                  <path d="M160 160 L220 155" stroke="#7a0000" strokeWidth="2" strokeLinecap="round" opacity="0.35" />
+                </g>
+
+                {/* decorative flare */}
+                <ellipse cx="430" cy="210" rx="70" ry="8" fill="rgba(255,255,255,0.06)" />
+              </svg>
+
+              {/* wheels stay as images to keep rotation look; positioned absolutely */}
+              <div className="wheels" aria-hidden="true">
+                <img
+                  src="https://i.imgur.com/uZh01my.png"
+                  alt="Front Wheel"
+                  className="frontWheel"
+                  onError={(e) => {
+                    // hide broken image if it fails to load
+                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+                <img
+                  src="https://i.imgur.com/uZh01my.png"
+                  alt="Back Wheel"
+                  className="backWheel"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                  }}
+                />
               </div>
             </div>
           </div>
@@ -68,99 +130,115 @@ const StyledWrapper = styled.div`
     overflow: hidden;
   }
 
-  /* Yellow Car Container */
+  /* Red Car Container */
   .carContainer {
     position: absolute;
-    left: -120px;
+    left: -140px; /* start further left for a clearer initial distance */
     bottom: 20px;
     /* use CSS variable --drive-duration to allow dynamic speed control from React */
-    animation: driveToParking var(--drive-duration, 4s) ease-in-out forwards;
+    animation: driveToParking var(--drive-duration, 4s) cubic-bezier(0.4, 0, 0.2, 1) forwards;
     z-index: 10;
+    pointer-events: none;
   }
 
-  .yellowCar {
+  .redCar {
     position: relative;
-    width: 120px;
+    width: 140px; /* slightly wider for a luxury look */
     height: auto;
-    filter: drop-shadow(2px 4px 8px rgba(0, 0, 0, 0.4)) drop-shadow(0 0 15px rgba(255, 215, 0, 0.3));
+    filter: drop-shadow(2px 6px 12px rgba(0, 0, 0, 0.45));
+    display: block;
   }
 
+  /* Ensure SVG scales properly and is visible */
   .carBody {
     width: 100%;
     height: auto;
-    animation: carBounce 1s linear infinite;
+    display: block;
+    position: relative;
+    z-index: 5; /* sits below wheels so wheels look on-top */
+    animation: carIdleBob 1.2s ease-in-out infinite;
+    transform-origin: center;
   }
 
-  @keyframes carBounce {
-    0% { transform: translateY(-2px); }
+  @keyframes carIdleBob {
+    0% { transform: translateY(-1px); }
     50% { transform: translateY(0px); }
-    100% { transform: translateY(-2px); }
+    100% { transform: translateY(-1px); }
   }
 
   .wheels {
     position: absolute;
-    bottom: 5px;
+    bottom: 6px;
     left: 50%;
     transform: translateX(-50%);
     width: 100%;
     height: 100%;
     pointer-events: none;
+    z-index: 6; /* above the car body so wheels are visible */
   }
 
-  /* wheel spin derives from drive duration so wheel speed matches car speed */
-  .frontWheel, .backWheel {
+  /* wheel spin derives from drive duration so wheel speed roughly matches car speed,
+     but also set a minimum spin speed so wheels keep rotating even when car is parked */
+  .frontWheel,
+  .backWheel {
     position: absolute;
-    width: 18px;
-    height: 18px;
-    animation: wheelSpin calc(var(--drive-duration, 4s) * 0.075) linear infinite;
+    width: 22px;
+    height: 22px;
+    will-change: transform;
+    object-fit: contain;
+    /* Wheel spin: base speed is a small fraction of drive-duration.
+       This keeps rotation visible while parked. */
+    animation: wheelSpin calc(var(--drive-duration, 4s) * 0.04) linear infinite;
   }
 
   .frontWheel {
-    right: 20px;
+    right: 18px;
     bottom: 0px;
   }
 
   .backWheel {
-    left: 20px;
+    left: 18px;
     bottom: 0px;
   }
 
   @keyframes wheelSpin {
+    0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
   }
 
+  /* driveToParking:
+     - Car stays mostly back (shows distance) while loading is underway.
+     - In the final stretch (last ~12-15% of the animation) it quickly zips and eases into the parking spot,
+       creating the "sudden arrival right before completion" effect the user requested.
+  */
   @keyframes driveToParking {
     0% {
       transform: translateX(0px) scale(1);
-      left: -120px;
-    }
-    15% {
-      transform: translateX(50px) scale(1);
-    }
-    30% {
-      transform: translateX(120px) scale(1);
-    }
-    45% {
-      transform: translateX(180px) scale(1);
+      left: -140px;
     }
     60% {
-      transform: translateX(220px) scale(0.9);
+      /* slow approach — keeps visible distance between car and P sign */
+      transform: translateX(120px) scale(1);
+      left: -140px;
+    }
+    80% {
+      /* a little closer but still clear distance */
+      transform: translateX(170px) scale(0.98);
       left: -120px;
     }
-    75% {
-      transform: translateX(240px) scale(0.85);
+    88% {
+      /* prepare for quick arrival — small hop and slight rotation for flair */
+      transform: translateX(185px) scale(0.97) rotate(-1deg);
       left: -100px;
     }
-    85% {
-      transform: translateX(250px) scale(0.8);
-      left: -80px;
-    }
-    95% {
-      transform: translateX(255px) scale(0.75);
-      left: -60px;
+    94% {
+      /* quick zip — most of movement happens here */
+      transform: translateX(240px) scale(0.88) rotate(0.5deg);
+      left: -50px;
     }
     100% {
-      transform: translateX(260px) scale(0.7);
+      /* final parked position: aligned inside the parking slot with slight scale to simulate depth */
+      transform: translateX(260px) scale(0.8) rotate(0deg);
       left: -40px;
     }
   }
@@ -171,31 +249,31 @@ const StyledWrapper = styled.div`
     position: absolute;
     bottom: -8px;
     left: 50%;
-    width: 80px;
-    height: 5px;
-    background: linear-gradient(90deg, rgba(255, 215, 0, 0.3), rgba(255, 165, 0, 0.2), rgba(255, 215, 0, 0.3));
+    width: 100px;
+    height: 6px;
+    background: linear-gradient(90deg, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.35));
     border-radius: 50%;
     transform: translateX(-50%);
-    filter: blur(3px);
-    animation: enhancedCarShadow var(--drive-duration, 4s) ease-in-out forwards;
+    filter: blur(4px);
+    animation: enhancedCarShadow var(--drive-duration, 4s) cubic-bezier(0.4, 0, 0.2, 1) forwards;
   }
 
   @keyframes enhancedCarShadow {
     0% {
-      transform: translateX(-50%) scale(1.2);
-      opacity: 0.4;
+      transform: translateX(-50%) scale(1.4);
+      opacity: 0.25;
     }
     60% {
-      transform: translateX(-50%) scale(1);
-      opacity: 0.6;
+      transform: translateX(-50%) scale(1.1);
+      opacity: 0.45;
     }
     85% {
-      transform: translateX(-50%) scale(0.8);
-      opacity: 0.7;
+      transform: translateX(-50%) scale(0.9);
+      opacity: 0.55;
     }
     100% {
-      transform: translateX(-50%) scale(0.6);
-      opacity: 0.8;
+      transform: translateX(-50%) scale(0.75);
+      opacity: 0.7;
     }
   }
 
@@ -219,18 +297,20 @@ const StyledWrapper = styled.div`
     border: 3px dashed #3B82F6;
     border-radius: 8px;
     animation: slotPulse 2s ease-in-out infinite;
+    background: rgba(255, 255, 255, 0.01);
   }
 
   @keyframes slotPulse {
-    0%, 100% {
+    0%,
+    100% {
       border-color: #3B82F6;
       opacity: 1;
       transform: scale(1);
     }
     50% {
       border-color: #60A5FA;
-      opacity: 0.8;
-      transform: scale(1.02);
+      opacity: 0.9;
+      transform: scale(1.03);
     }
   }
 
@@ -239,21 +319,22 @@ const StyledWrapper = styled.div`
     font-weight: 900;
     color: #3B82F6;
     font-family: 'Arial Black', sans-serif;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3), 0 0 10px rgba(59, 130, 246, 0.3);
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.35), 0 0 10px rgba(59, 130, 246, 0.28);
     animation: signGlowEnhanced 2s ease-in-out infinite;
     z-index: 6;
   }
 
   @keyframes signGlowEnhanced {
-    0%, 100% {
+    0%,
+    100% {
       transform: scale(1);
       color: #3B82F6;
-      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3), 0 0 10px rgba(59, 130, 246, 0.3);
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.35), 0 0 10px rgba(59, 130, 246, 0.28);
     }
     50% {
-      transform: scale(1.1);
+      transform: scale(1.06);
       color: #60A5FA;
-      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3), 0 0 15px rgba(96, 165, 250, 0.5);
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.35), 0 0 15px rgba(96, 165, 250, 0.4);
     }
   }
 
@@ -272,8 +353,8 @@ const StyledWrapper = styled.div`
     height: 3px;
     background: linear-gradient(90deg, #3B82F6, #60A5FA);
     border-radius: 2px;
-    opacity: 0.7;
-    box-shadow: 0 0 5px rgba(59, 130, 246, 0.3);
+    opacity: 0.8;
+    box-shadow: 0 0 5px rgba(59, 130, 246, 0.25);
   }
 
   /* Road */
@@ -287,6 +368,7 @@ const StyledWrapper = styled.div`
     display: flex;
     justify-content: space-between;
     padding: 0 20px;
+    z-index: 2;
   }
 
   .roadMark {
@@ -297,9 +379,15 @@ const StyledWrapper = styled.div`
     animation: roadMove calc(var(--drive-duration, 4s) * 0.375) linear infinite;
   }
 
-  .roadMark:nth-child(1) { animation-delay: 0s; }
-  .roadMark:nth-child(2) { animation-delay: 0.5s; }
-  .roadMark:nth-child(3) { animation-delay: 1s; }
+  .roadMark:nth-child(1) {
+    animation-delay: 0s;
+  }
+  .roadMark:nth-child(2) {
+    animation-delay: 0.5s;
+  }
+  .roadMark:nth-child(3) {
+    animation-delay: 1s;
+  }
 
   @keyframes roadMove {
     0% {
@@ -323,7 +411,7 @@ const StyledWrapper = styled.div`
     left: 0;
     right: 0;
     bottom: 0;
-    background: radial-gradient(ellipse at center bottom, rgba(59, 130, 246, 0.1) 0%, transparent 70%);
+    background: radial-gradient(ellipse at center bottom, rgba(59, 130, 246, 0.06) 0%, transparent 70%);
     pointer-events: none;
     z-index: 1;
   }
