@@ -1,3 +1,23 @@
+/**
+ * @openapi
+ * tags:
+ *   - name: Ratings
+ *     description: User ratings system
+ *
+ * /api/ratings:
+ *   post:
+ *     tags: [Ratings]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Create rating
+ *
+ * /api/ratings/user/{userId}:
+ *   get:
+ *     tags: [Ratings]
+ *     summary: Get ratings for a user
+ */
+
+
 // backend/routes/ratings.js
 import express from 'express';
 import { protect } from '../middleware/auth.js';

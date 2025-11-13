@@ -5,10 +5,7 @@ import ParkFinderSecondUser from '../models/User.js';
 import UserToken from '../models/UserToken.js';
 import NotificationService from '../service/NotificationService.js';
 import BookedSlot from '../models/BookedSlot.js';
-// import NotificationService from "../services/NotificationService.js";
-// import UserToken from "../models/UserToken.js";
-// import Booking from "../models/Booking.js";
-// import { releaseParkingSpot } from "../utils/parkingUtils.js";
+
 // Simple notification placeholder
 const sendNotification = (email, subject, message) => {
   console.log(`Notification sent to ${email}: ${subject} - ${message}`);
@@ -142,7 +139,6 @@ export const createBooking = async (req, res) => {
       vehicleModel,
       contactNumber,
       chassisNumber,
-      // other fields if you accept them
     } = req.body;
 
     if (!parkingSpaceId) return res.status(400).json({ message: 'parkingSpaceId required' });
@@ -165,9 +161,7 @@ export const createBooking = async (req, res) => {
       return res.status(400).json({ message: 'endTime must be after startTime' });
     }
 
-    // Count overlapping bookings for this parkingSpace from the Booking collection
-    // Overlap condition: existing.startTime < newEnd && existing.endTime > newStart
-    // Consider only statuses that actually occupy a spot
+    // Overlap count
     const overlappingStatuses = ['pending', 'accepted', 'confirmed', 'active'];
     const overlapQuery = {
       parkingSpace: parkingSpace._id,
@@ -183,13 +177,13 @@ export const createBooking = async (req, res) => {
       return res.status(400).json({ message: 'No slots available for the selected time interval' });
     }
 
-    // Create booking (you may compute totalPrice here if needed)
+    // Create booking
     const booking = new Booking({
       user: req.user._id,
       parkingSpace: parkingSpaceId,
       startTime: parsedStart,
       endTime: parsedEnd,
-      totalPrice: 0, // compute if you have a pricing helper
+      totalPrice: 0,
       pricePerHour,
       vehicleNumber,
       vehicleType,
@@ -203,7 +197,7 @@ export const createBooking = async (req, res) => {
 
     await booking.save();
 
-    // Create the BookedSlot audit record so future checks can rely on it (optional but useful)
+    // Audit
     try {
       const bs = new BookedSlot({
         user: req.user._id,
@@ -214,15 +208,10 @@ export const createBooking = async (req, res) => {
       });
       await bs.save();
     } catch (errBs) {
-      // do not fail booking if audit creation fails, but log
       console.warn('[createBooking] failed to create BookedSlot', errBs);
     }
 
-    // (Optional) If you had code that tried to mutate parkingSpace.availability,
-    // we intentionally do NOT rely on that array because it is brittle.
-    // If you still want that array updated, do it here but handle errors gracefully.
-
-    // Emit socket events (if you use global.io)
+    // Emit socket
     try {
       if (global.io) {
         const populated = await Booking.findById(booking._id)
@@ -241,11 +230,11 @@ export const createBooking = async (req, res) => {
   }
 };
 
-
-
 export const getMyBookings = async (req, res) => {
   try {
-    const bookings = await Booking.find({ user: req.user._id }).populate('parkingSpace').sort('-createdAt');
+    const bookings = await Booking.find({ user: req.user._id })
+      .populate('parkingSpace')
+      .sort('-createdAt');
     res.json(bookings);
   } catch (err) {
     console.error('getMyBookings error', err);
@@ -253,63 +242,48 @@ export const getMyBookings = async (req, res) => {
   }
 };
 
+/**
+ * ✅ FIXED: send the correct parking space title + a flattened field
+ */
 export const getProviderBookings = async (req, res) => {
   try {
     const providerId = req.user._id;
-    const parkingSpaces = await ParkingSpace.find({ owner: providerId });
-    if (!parkingSpaces.length) return res.status(200).json([]);
-    const ids = parkingSpaces.map(s => s._id);
-    const bookings = await Booking.find({ parkingSpace: { $in: ids } })
+
+    // find this provider's spaces
+    const spaces = await ParkingSpace.find({ owner: providerId }).select('_id');
+    if (!spaces.length) {
+      return res.status(200).json({ bookings: [] });
+    }
+
+    const spaceIds = spaces.map((s) => s._id);
+
+    // populate the *title* from ParkingSpace (schema uses 'title')
+    const bookings = await Booking.find({ parkingSpace: { $in: spaceIds } })
       .populate('user', 'name email contactNumber')
-      .populate('parkingSpace', 'name location pricePerHour');
-    res.status(200).json(bookings);
+      .populate('parkingSpace', 'title address') // << title (NOT name)
+      .sort('-startTime')
+      .lean();
+
+    // Shape to add flat fields for the frontend
+    const shaped = bookings.map((b) => {
+      const addr = b?.parkingSpace?.address || {};
+      const parkingSpaceAddress = [addr.street, addr.city, addr.state, addr.zipCode, addr.country]
+        .filter(Boolean)
+        .join(', ');
+
+      return {
+        ...b,
+        parkingSpaceTitle: b?.parkingSpace?.title || null,
+        parkingSpaceAddress: parkingSpaceAddress || null,
+      };
+    });
+
+    return res.status(200).json({ bookings: shaped });
   } catch (err) {
     console.error('getProviderBookings error', err);
     res.status(500).json({ message: 'Failed to fetch provider bookings', error: err.message });
   }
 };
-  //  OLD
-// export const updateBookingStatus = async (req, res) => {
-//   try {
-//     const { status } = req.body;
-//     const bookingId = req.params.id;
-//     const allowed = ['pending', 'accepted', 'rejected', 'confirmed', 'completed', 'cancelled', 'overdue'];
-//     if (!allowed.includes(status)) return res.status(400).json({ message: 'Invalid status' });
-
-//     const booking = await Booking.findById(bookingId);
-//     if (!booking) return res.status(404).json({ message: 'Booking not found' });
-
-//     booking.status = status;
-//     if (status === 'accepted') booking.providerId = req.user._id;
-//     if (status === 'completed') {
-//       booking.completedAt = new Date();
-//       if (!booking.endedAt) booking.endedAt = booking.completedAt;
-//       if (!booking.endTime) booking.endTime = booking.sessionEndAt ?? booking.completedAt;
-//       if (booking.parkingSpace) {
-//         try { await releaseParkingSpot(booking.parkingSpace, booking); } catch (e) { console.warn('release failed on manual complete', e); }
-//       }
-//     }
-
-//     await booking.save();
-
-//     try {
-//       if (global.io) {
-//         const populated = await Booking.findById(booking._id).populate('parkingSpace').populate('user', 'name email');
-//         global.io.emit('booking-updated', { booking: populated });
-//       }
-//     } catch (emitErr) {
-//       console.warn('[updateBookingStatus] emit error', emitErr);
-//     }
-
-//     const freshBooking = await Booking.findById(booking._id).populate('parkingSpace').populate('user', 'name email');
-//     res.status(200).json({ message: 'Booking status updated successfully', booking: freshBooking });
-//   } catch (error) {
-//     console.error('updateBookingStatus error', error);
-//     res.status(500).json({ message: 'Failed to update booking status', error: error.message });
-//   }
-// };
-
-
 
 export const updateBookingStatus = async (req, res) => {
   try {
@@ -317,27 +291,32 @@ export const updateBookingStatus = async (req, res) => {
     const bookingId = req.params.id;
 
     const allowed = [
-      "pending", "accepted", "rejected", "confirmed",
-      "completed", "cancelled", "overdue"
+      'pending',
+      'accepted',
+      'rejected',
+      'confirmed',
+      'completed',
+      'cancelled',
+      'overdue',
     ];
     if (!allowed.includes(status))
-      return res.status(400).json({ message: "Invalid status" });
+      return res.status(400).json({ message: 'Invalid status' });
 
-    const booking = await Booking.findById(bookingId).populate("user", "name email");
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
+    const booking = await Booking.findById(bookingId).populate('user', 'name email');
+    if (!booking) return res.status(404).json({ message: 'Booking not found' });
 
     booking.status = status;
-    if (status === "accepted") booking.providerId = req.user._id;
-    if (status === "completed") {
+    if (status === 'accepted') booking.providerId = req.user._id;
+    if (status === 'completed') {
       booking.completedAt = new Date();
       if (!booking.endedAt) booking.endedAt = booking.completedAt;
       if (!booking.endTime) booking.endTime = booking.sessionEndAt ?? booking.completedAt;
       if (booking.parkingSpace) {
         try {
           // await releaseParkingSpot(booking.parkingSpace, booking);
-          console.log("release logic will come here")
+          console.log('release logic will come here');
         } catch (e) {
-          console.warn("release failed on manual complete", e);
+          console.warn('release failed on manual complete', e);
         }
       }
     }
@@ -348,21 +327,20 @@ export const updateBookingStatus = async (req, res) => {
     try {
       if (global.io) {
         const populated = await Booking.findById(booking._id)
-          .populate("parkingSpace")
-          .populate("user", "name email");
-        global.io.emit("booking-updated", { booking: populated });
-      }
+          .populate('parkingSpace')
+          .populate('user', 'name email');
+        global.io.emit('booking-updated', { booking: populated });
+    }
     } catch (emitErr) {
-      console.warn("[updateBookingStatus] emit error", emitErr);
+      console.warn('[updateBookingStatus] emit error', emitErr);
     }
 
     // ✅ Send FCM Notification
     try {
       const userId = booking.user?._id;
       if (userId) {
-        // Fetch all device tokens for this user
-        const userTokens = await UserToken.find({ userId }).select("token -_id");
-        const tokens = userTokens.map(t => t.token);
+        const userTokens = await UserToken.find({ userId }).select('token -_id');
+        const tokens = userTokens.map((t) => t.token);
 
         if (tokens.length > 0) {
           const title = `Booking ${status}`;
@@ -380,26 +358,24 @@ export const updateBookingStatus = async (req, res) => {
         }
       }
     } catch (notifErr) {
-      console.error("[updateBookingStatus] Notification error", notifErr);
+      console.error('[updateBookingStatus] Notification error', notifErr);
     }
 
     const freshBooking = await Booking.findById(booking._id)
-      .populate("parkingSpace")
-      .populate("user", "name email");
+      .populate('parkingSpace')
+      .populate('user', 'name email');
 
     res.status(200).json({
-      message: "Booking status updated successfully",
+      message: 'Booking status updated successfully',
       booking: freshBooking,
     });
   } catch (error) {
-    console.error("updateBookingStatus error", error);
+    console.error('updateBookingStatus error', error);
     res
       .status(500)
-      .json({ message: "Failed to update booking status", error: error.message });
+      .json({ message: 'Failed to update booking status', error: error.message });
   }
 };
-
-
 
 export const getBookingById = async (req, res) => {
   try {
@@ -407,13 +383,13 @@ export const getBookingById = async (req, res) => {
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
 
     const parkingSpace = await ParkingSpace.findById(booking.parkingSpace);
-    const isOwner = parkingSpace && parkingSpace.owner && parkingSpace.owner.toString() === req.user._id.toString();
+    const isOwner =
+      parkingSpace && parkingSpace.owner && parkingSpace.owner.toString() === req.user._id.toString();
     const isBuyer = booking.user && booking.user.toString() === req.user._id.toString();
     if (!isOwner && !isBuyer) return res.status(403).json({ message: 'Not authorized' });
 
     const bookingData = booking.toObject();
     if (isOwner && !isBuyer) {
-      // hide secondOtp for provider UI to avoid leaking; provider should request user-provided code.
       delete bookingData.secondOtp;
       delete bookingData.secondOtpExpires;
     }
@@ -424,138 +400,6 @@ export const getBookingById = async (req, res) => {
     res.status(500).json({ message: 'Failed to get booking', error: err.message });
   }
 };
-
-/**
- * Cancel booking (previously deleteById)
- * - Frontend uses DELETE /api/booking/:bookingId with body { refundPercent } (optional)
- * - Only booking owner can cancel
- * - Not allowed within 1 hour of startTime
- * - Marks booking.status = 'cancelled', records refund details, unmarks availability slot (best-effort), emits update
- */
-// export const deleteById = async (req, res) => {
-//   try {
-//     const { bookingId } = req.params;
-//     const requesterId = req.user._id;
-
-//     if (!mongoose.Types.ObjectId.isValid(bookingId)) return res.status(400).json({ message: 'Invalid booking id' });
-
-//     const booking = await Booking.findById(bookingId);
-//     if (!booking) return res.status(404).json({ message: 'Booking not found' });
-
-//     // Only booking owner (buyer) may cancel via this endpoint
-//     if (!booking.user || booking.user.toString() !== requesterId.toString()) {
-//       return res.status(403).json({ message: 'Not authorized to cancel this booking' });
-//     }
-
-//     // Do not allow cancelling completed/active/overdue bookings via this endpoint.
-//     if (['completed', 'active', 'overdue', 'cancelled'].includes(booking.status)) {
-//       return res.status(400).json({ message: `Cannot cancel booking in status '${booking.status}'` });
-//     }
-
-//     // Determine hours until start
-//     let hoursUntilStart = Infinity;
-//     if (booking.startTime) {
-//       const startTs = new Date(booking.startTime).getTime();
-//       if (!isNaN(startTs)) {
-//         hoursUntilStart = (startTs - Date.now()) / (1000 * 60 * 60);
-//       }
-//     }
-
-//     // Cancellation not allowed within 1 hour
-//     if (hoursUntilStart <= 1) {
-//       return res.status(400).json({ message: 'Cancellation not allowed within 1 hour of start time' });
-//     }
-
-//     // Compute refundPercent:
-//     // frontend rules: >3 => 60, >2 => 40, >1 => 10, <=1 => 0
-//     const computeCancelRefundPercent = (hrs) => {
-//       if (hrs > 3) return 60;
-//       if (hrs > 2) return 40;
-//       if (hrs > 1) return 10;
-//       return 0;
-//     };
-
-//     // If client passed refundPercent, prefer validated value; otherwise compute
-//     let requestedPercent = Number.isFinite(Number(req.body?.refundPercent)) ? Number(req.body.refundPercent) : null;
-//     let refundPercent = computeCancelRefundPercent(hoursUntilStart);
-//     if (requestedPercent !== null && !isNaN(requestedPercent)) {
-//       // don't allow arbitrary percent; clamp to computed percent (can't be larger than allowed)
-//       // allow smaller percent only if requested and valid (but typically client shouldn't override)
-//       requestedPercent = Math.max(0, Math.min(100, requestedPercent));
-//       // only accept requested percent if it is <= computed max percent, otherwise ignore
-//       if (requestedPercent <= refundPercent) {
-//         refundPercent = requestedPercent;
-//       }
-//     }
-
-//     // Determine paid amount (best-effort)
-//     // Prefer booking.totalPrice, otherwise try pricePerHour * duration
-//     let paidAmount = Number(booking.totalPrice ?? 0);
-//     if (!paidAmount || paidAmount <= 0) {
-//       const startTs = booking.startTime ? new Date(booking.startTime).getTime() : null;
-//       const endTs = booking.endTime ? new Date(booking.endTime).getTime() : null;
-//       let hours = 1;
-//       if (startTs && endTs && !isNaN(startTs) && !isNaN(endTs) && endTs > startTs) {
-//         hours = Math.max(1, Math.ceil((endTs - startTs) / (1000 * 60 * 60)));
-//       }
-//       const perHour = Number(booking.pricePerHour ?? booking.priceParking ?? 0) || 0;
-//       paidAmount = +(perHour * hours);
-//     }
-
-//     const refundAmount = +(paidAmount * (refundPercent / 100));
-
-//     // Mark booking as cancelled and attach refund meta
-//     booking.status = 'cancelled';
-//     booking.cancelledAt = new Date();
-//     booking.refund = {
-//       percent: refundPercent,
-//       amount: refundAmount,
-//     };
-//     // Optionally note who cancelled
-//     booking.cancelledBy = requesterId;
-
-//     // Try to unmark availability slot (best-effort)
-//     try {
-//       if (booking.parkingSpace && booking.startTime && booking.endTime) {
-//         const startDateMidnight = new Date(booking.startTime);
-//         startDateMidnight.setHours(0, 0, 0, 0);
-//         await ParkingSpace.findByIdAndUpdate(
-//           booking.parkingSpace,
-//           { $set: { 'availability.$[dateElem].slots.$[slotElem].isBooked': false } },
-//           { arrayFilters: [{ 'dateElem.date': { $eq: startDateMidnight } }, { 'slotElem.startTime': new Date(booking.startTime), 'slotElem.endTime': new Date(booking.endTime) }], new: true }
-//         );
-//       }
-//     } catch (unmarkErr) {
-//       console.warn('Warning: failed to unmark availability slot (nonfatal)', unmarkErr);
-//     }
-
-//     await booking.save();
-
-//     // emit update to sockets
-//     try {
-//       if (global.io) {
-//         const populated = await Booking.findById(booking._id).populate('parkingSpace').populate('user', 'name email');
-//         global.io.emit('booking-updated', { booking: populated });
-//       }
-//     } catch (emitErr) {
-//       console.warn('[deleteById] emit error', emitErr);
-//     }
-
-//     // NOTE: actual payment gateway refund processing should be triggered here if integrated.
-//     // For example, queue a refund job with the payment provider using booking.paymentIntentId or similar.
-//     // This implementation only records refund amount on the booking and expects a separate payment/refund job to run.
-
-//     return res.status(200).json({
-//       message: 'Booking cancelled successfully',
-//       booking: await Booking.findById(booking._id).populate('parkingSpace').populate('user', 'name email'),
-//       refundAmount,
-//       refundPercent
-//     });
-//   } catch (err) {
-//     console.error('deleteById error:', err);
-//     return res.status(500).json({ message: 'Failed to cancel booking', error: err.message });
-//   }
-// };
 
 export const deleteById = async (req, res) => {
   try {
@@ -632,7 +476,13 @@ export const deleteById = async (req, res) => {
         await ParkingSpace.findByIdAndUpdate(
           booking.parkingSpace,
           { $set: { 'availability.$[dateElem].slots.$[slotElem].isBooked': false } },
-          { arrayFilters: [{ 'dateElem.date': { $eq: startDateMidnight } }, { 'slotElem.startTime': new Date(booking.startTime), 'slotElem.endTime': new Date(booking.endTime) }], new: true }
+          {
+            arrayFilters: [
+              { 'dateElem.date': { $eq: startDateMidnight } },
+              { 'slotElem.startTime': new Date(booking.startTime), 'slotElem.endTime': new Date(booking.endTime) },
+            ],
+            new: true,
+          }
         );
       }
     } catch (unmarkErr) {
@@ -651,22 +501,17 @@ export const deleteById = async (req, res) => {
       console.warn('[deleteById] emit error', emitErr);
     }
 
-    // === FCM NOTIFICATION: START ===
-    // Where I added it: right after saving the cancelled booking and emitting via socket.io
+    // FCM notification
     try {
-      const userId = booking.user; // may be ObjectId
+      const userId = booking.user;
       if (userId) {
-        // get tokens for the booking owner
         const docs = await UserToken.find({ userId }).select('token -_id');
-        const tokens = docs.map(d => d.token).filter(Boolean);
+        const tokens = docs.map((d) => d.token).filter(Boolean);
 
         if (tokens.length > 0) {
           const title = `Booking cancelled`;
-          // include refund info in body (keeps message short)
           const body = `Your booking has been cancelled. Refund: ₹${refundAmount.toFixed(2)} (${refundPercent}%).`;
 
-          // NotificationService should handle batching as necessary.
-          // If you don't have batching inside NotificationService, we'll split into 500-token chunks here.
           const MAX_BATCH = 500;
           for (let i = 0; i < tokens.length; i += MAX_BATCH) {
             const chunk = tokens.slice(i, i + MAX_BATCH);
@@ -683,28 +528,23 @@ export const deleteById = async (req, res) => {
         }
       }
     } catch (notifErr) {
-      // log but do not fail the cancellation flow
       console.error('[deleteById] Notification error', notifErr);
-      // Optional: collect invalid tokens from NotificationService response and remove them
     }
-    // === FCM NOTIFICATION: END ===
 
     return res.status(200).json({
       message: 'Booking cancelled successfully',
       booking: await Booking.findById(booking._id).populate('parkingSpace').populate('user', 'name email'),
       refundAmount,
-      refundPercent
+      refundPercent,
     });
   } catch (err) {
     console.error('deleteById error:', err);
     return res.status(500).json({ message: 'Failed to cancel booking', error: err.message });
   }
 };
+
 /**
- * Generate OTP:
- *  - Buyer triggers this after payment
- *  - If booking.status === 'active' OR (status === 'overdue' && paymentStatus === 'paid') -> creates secondOtp (checkout)
- *  - Otherwise -> creates primary OTP (check-in)
+ * Generate OTP
  */
 export const generateOTP = async (req, res) => {
   try {
@@ -714,26 +554,28 @@ export const generateOTP = async (req, res) => {
     const booking = await Booking.findById(bookingId);
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
 
-    if (booking.user.toString() !== userId.toString()) return res.status(403).json({ message: 'Not authorized to generate OTP for this booking' });
-    if (booking.paymentStatus !== 'paid') return res.status(400).json({ message: 'OTP can be generated only for paid bookings' });
+    if (booking.user.toString() !== userId.toString())
+      return res.status(403).json({ message: 'Not authorized to generate OTP for this booking' });
+    if (booking.paymentStatus !== 'paid')
+      return res.status(400).json({ message: 'OTP can be generated only for paid bookings' });
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresInMs = 10 * 60 * 1000;
     const expiresAt = new Date(Date.now() + expiresInMs);
 
-    // Allow second-OTP when booking is active OR when overdue but user already paid the fine
     if (booking.status === 'active' || (booking.status === 'overdue' && booking.paymentStatus === 'paid')) {
       booking.secondOtp = otp;
       booking.secondOtpExpires = expiresAt;
       await booking.save();
 
-      // emit update
       try {
         if (global.io) {
           const populated = await Booking.findById(booking._id).populate('parkingSpace').populate('user', 'name email');
           global.io.emit('booking-updated', { booking: populated });
         }
-      } catch (e) { console.warn('generateOTP emit', e); }
+      } catch (e) {
+        console.warn('generateOTP emit', e);
+      }
 
       return res.status(200).json({ otp, expiresAt: booking.secondOtpExpires, bookingId: booking._id, type: 'second' });
     } else {
@@ -747,7 +589,9 @@ export const generateOTP = async (req, res) => {
           const populated = await Booking.findById(booking._id).populate('parkingSpace').populate('user', 'name email');
           global.io.emit('booking-updated', { booking: populated });
         }
-      } catch (e) { console.warn('generateOTP emit', e); }
+      } catch (e) {
+        console.warn('generateOTP emit', e);
+      }
 
       return res.status(200).json({ otp, expiresAt: booking.otpExpires, bookingId: booking._id, type: 'primary' });
     }
@@ -779,8 +623,6 @@ export const decrementParkingAvailable = async (parkingId) => {
 
 /**
  * Verify primary OTP (provider verifies check-in)
- * - Enforces provider authorization
- * - Enforces start window: provider can verify at/after (startTime - 15min)
  */
 export const verifyOTP = async (req, res) => {
   try {
@@ -835,7 +677,11 @@ export const verifyOTP = async (req, res) => {
       booking.otp = null;
       booking.otpExpires = null;
 
-      try { await decrementParkingAvailable(booking.parkingSpace); } catch (e) { console.warn('decrementParkingAvailable failed', e); }
+      try {
+        await decrementParkingAvailable(booking.parkingSpace);
+      } catch (e) {
+        console.warn('decrementParkingAvailable failed', e);
+      }
 
       await booking.save();
 
@@ -870,7 +716,8 @@ export const verifyOTP = async (req, res) => {
     if (booking.status === 'active') {
       booking.status = 'completed';
       booking.completedAt = new Date();
-      booking.sessionEndAt = booking.sessionEndAt && new Date(booking.sessionEndAt) > new Date() ? booking.sessionEndAt : new Date();
+      booking.sessionEndAt =
+        booking.sessionEndAt && new Date(booking.sessionEndAt) > new Date() ? booking.sessionEndAt : new Date();
       booking.otp = null;
       booking.otpExpires = null;
       booking.otpVerified = true;
@@ -905,9 +752,6 @@ export const verifyOTP = async (req, res) => {
 
 /**
  * Verify second OTP (provider verifies checkout)
- * - Only provider (owner) or assigned providerId can verify
- * - Booking must be active or overdue (we allow both)
- * - On success: mark completed, clear secondOtp, release spot, emit updates
  */
 export const verifySecondOtp = async (req, res) => {
   try {
@@ -932,10 +776,13 @@ export const verifySecondOtp = async (req, res) => {
     }
     if (!isAuthorized) return res.status(403).json({ message: 'Not authorized to verify OTP for this booking' });
 
-    if (!['active', 'overdue'].includes(booking.status)) return res.status(400).json({ message: 'Booking must be active or overdue to verify second OTP' });
+    if (!['active', 'overdue'].includes(booking.status))
+      return res.status(400).json({ message: 'Booking must be active or overdue to verify second OTP' });
 
-    if (!booking.secondOtp || !booking.secondOtpExpires) return res.status(400).json({ message: 'Second OTP not generated for this booking' });
-    if (new Date(booking.secondOtpExpires) < new Date()) return res.status(400).json({ message: 'Second OTP expired' });
+    if (!booking.secondOtp || !booking.secondOtpExpires)
+      return res.status(400).json({ message: 'Second OTP not generated for this booking' });
+    if (new Date(booking.secondOtpExpires) < new Date())
+      return res.status(400).json({ message: 'Second OTP expired' });
     if (booking.secondOtp.toString().trim() !== otp) return res.status(400).json({ message: 'Invalid OTP' });
 
     booking.status = 'completed';
@@ -980,7 +827,7 @@ export const verifySecondOtp = async (req, res) => {
 };
 
 /**
- * Extend booking by hours (simple endpoint; payment flow should call verify-payment with extend:true which also performs extension)
+ * Extend booking by hours
  */
 export const extendBooking = async (req, res) => {
   try {
@@ -994,10 +841,8 @@ export const extendBooking = async (req, res) => {
     const currentEnd = booking.endTime ? new Date(booking.endTime) : new Date();
     const newEnd = new Date(currentEnd.getTime() + hoursToAdd * 60 * 60 * 1000);
 
-    // set endTime as ISO string for consistency
     booking.endTime = newEnd.toISOString();
     if (booking.status === 'active') {
-      // keep sessionEndAt as Date object for timer calculations
       booking.sessionEndAt = newEnd;
     }
 
@@ -1014,7 +859,7 @@ export const extendBooking = async (req, res) => {
 
     return res.status(200).json(booking);
   } catch (error) {
-    console.error('extendBooking error:', error);
+    console.error('extendBooking error', error);
     return res.status(500).json({ message: 'Server error', error: error.message });
   }
 };

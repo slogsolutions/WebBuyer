@@ -1,3 +1,25 @@
+/**
+ * @openapi
+ * tags:
+ *   - name: Booking
+ *     description: Parking space booking system
+ *
+ * /api/booking:
+ *   post:
+ *     tags: [Booking]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Create a parking booking
+ *
+ * /api/booking/my-bookings:
+ *   get:
+ *     tags: [Booking]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Get logged in user's bookings
+ */
+
+
 import express from 'express';
 import { protect } from '../middleware/auth.js';
 import {

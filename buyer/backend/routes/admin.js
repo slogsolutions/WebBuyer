@@ -1,3 +1,4 @@
+
 import express from "express";
 import dotenv from "dotenv";
 dotenv.config({ path: "./.env" });
@@ -12,6 +13,7 @@ import DeviceToken from '../models/DeviceToken.js';
 
 const router = express.Router();
 
+// === NOTIFICATION: SEND PUSH NOTIFICATION ===
 router.post("/firebase", async (req, res) => {
   try {
     const {
@@ -85,6 +87,7 @@ router.post("/firebase", async (req, res) => {
   }
 });
 
+// === SAVE FCM TOKEN (BASIC) ===
 router.post('/save-token-basic', async (req, res) => {
   try {
     const { fcmToken, userId, deviceInfo } = req.body || {};
@@ -129,6 +132,7 @@ router.post('/save-token-basic', async (req, res) => {
   }
 });
 
+// === ANDROID BASIC SAVE TOKEN ===
 router.post('/android-basic-save', async (req, res) => {
   try {
     const { fcmToken, deviceInfo } = req.body || {};
@@ -164,6 +168,7 @@ router.post('/android-basic-save', async (req, res) => {
   }
 });
 
+// === DEBUG: LIST ALL DEVICE TOKENS ===
 router.get('/debug/tokens', async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit || '200', 10), 2000);
@@ -179,6 +184,7 @@ router.get('/debug/tokens', async (req, res) => {
   }
 });
 
+// === SEED DATABASE ===
 router.post("/seed", async(req,res) => {
   try{
     console.log("Seeding started...");
@@ -191,7 +197,7 @@ router.post("/seed", async(req,res) => {
   }
 });
 
-// Users routes
+// === USERS: CRUD + BULK DELETE ===
 router.get("/users", protect, adminOnly, async (req, res) => {
   try {
     const users = await User.find();
@@ -244,7 +250,6 @@ router.delete("/users/:id", protect, adminOnly, async (req, res) => {
   }
 });
 
-// NEW: Bulk delete users
 router.post("/users/bulk-delete", protect, adminOnly, async (req, res) => {
   try {
     const { ids } = req.body;
@@ -252,17 +257,14 @@ router.post("/users/bulk-delete", protect, adminOnly, async (req, res) => {
       return res.status(400).json({ error: "Please provide an array of user IDs" });
     }
     const result = await User.deleteMany({ _id: { $in: ids } });
-    res.json({ 
-      message: `${result.deletedCount} user(s) deleted successfully`,
-      deletedCount: result.deletedCount 
-    });
+    res.json({ deletedCount: result.deletedCount });
   } catch (err) {
     console.error("Error bulk deleting users:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Bookings routes
+// === BOOKINGS: CRUD + BULK DELETE ===
 router.get("/bookings", protect, adminOnly, async (req, res) => {
   try {
     const bookings = await Booking.find()
@@ -313,7 +315,6 @@ router.delete("/bookings/:id", protect, adminOnly, async (req, res) => {
   }
 });
 
-// NEW: Bulk delete bookings
 router.post("/bookings/bulk-delete", protect, adminOnly, async (req, res) => {
   try {
     const { ids } = req.body;
@@ -321,17 +322,14 @@ router.post("/bookings/bulk-delete", protect, adminOnly, async (req, res) => {
       return res.status(400).json({ error: "Please provide an array of booking IDs" });
     }
     const result = await Booking.deleteMany({ _id: { $in: ids } });
-    res.json({ 
-      message: `${result.deletedCount} booking(s) deleted successfully`,
-      deletedCount: result.deletedCount 
-    });
+    res.json({ deletedCount: result.deletedCount });
   } catch (err) {
     console.error("Error bulk deleting bookings:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Parking spaces routes
+// === PARKING SPACES: CRUD + BULK DELETE ===
 router.get("/parkingspaces", protect, adminOnly, async (req, res) => {
   try {
     const spaces = await ParkingSpace.find()
@@ -382,7 +380,6 @@ router.delete("/parkingspaces/:id", protect, adminOnly, async (req, res) => {
   }
 });
 
-// NEW: Bulk delete parking spaces
 router.post("/parkingspaces/bulk-delete", protect, adminOnly, async (req, res) => {
   try {
     const { ids } = req.body;
@@ -390,17 +387,14 @@ router.post("/parkingspaces/bulk-delete", protect, adminOnly, async (req, res) =
       return res.status(400).json({ error: "Please provide an array of parking space IDs" });
     }
     const result = await ParkingSpace.deleteMany({ _id: { $in: ids } });
-    res.json({ 
-      message: `${result.deletedCount} parking space(s) deleted successfully`,
-      deletedCount: result.deletedCount 
-    });
+    res.json({ deletedCount: result.deletedCount });
   } catch (err) {
     console.error("Error bulk deleting parking spaces:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Debug route
+// === DEBUG: OVERVIEW ===
 router.get("/debug", protect, adminOnly, async (req, res) => {
   try {
     const userCount = await User.countDocuments();

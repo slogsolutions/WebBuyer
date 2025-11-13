@@ -68,6 +68,24 @@ export default function ParkingPopup({
   const [isFavorite, setIsFavorite] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
 
+  // Dark theme detection (same as Home.tsx)
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    try {
+      return typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const obs = new MutationObserver(() => {
+      setIsDark(document.documentElement.classList.contains('dark'));
+    });
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => obs.disconnect();
+  }, []);
+
   const API_BASE = import.meta.env.VITE_BASE_URL?.replace(/\/$/, '') || window.location.origin;
   const CLOUD_NAME = (import.meta.env.VITE_CLOUDINARY_CLOUD_NAME ?? '').toString().trim();
 
@@ -282,45 +300,44 @@ export default function ParkingPopup({
         userId: uid,
         startTime: startTime ?? null,
         endTime: endTime ?? null,
-        totalAmount: totalAmount ?? null,
+        totalAmount: totalAmount,
+        perHour: perHour,
+        durationHours: durationHours,
       },
     });
+    onClose();
   };
 
-  const getStars = (avg: number) => {
-    const rounded = Math.round(Number(avg || 0) * 2) / 2;
-    const full = Math.floor(rounded);
-    const half = rounded - full >= 0.5;
-    const stars: JSX.Element[] = [];
-    for (let i = 0; i < full; i++) stars.push(<FaStar key={`f-${i}`} className="text-yellow-400" />);
-    if (half) stars.push(<FaStarHalfAlt key="half" className="text-yellow-400" />);
-    const remaining = 5 - full - (half ? 1 : 0);
-    for (let i = 0; i < remaining; i++) stars.push(<FaStar key={`e-${i}`} className="text-gray-300" />);
+  const getStars = (rating: number) => {
+    const stars = [];
+    const fullStars = Math.floor(rating);
+    const hasHalfStar = rating % 1 >= 0.5;
+
+    for (let i = 0; i < 5; i++) {
+      if (i < fullStars) {
+        stars.push(<FaStar key={i} className="text-yellow-400" />);
+      } else if (i === fullStars && hasHalfStar) {
+        stars.push(<FaStarHalfAlt key={i} className="text-yellow-400" />);
+      } else {
+        stars.push(<FaStar key={i} className="text-gray-300 dark:text-gray-600" />);
+      }
+    }
     return stars;
   };
 
-  const topComments = reviews.slice(0, 2);
+  // const topComments = reviews.slice(0, 2); // Not needed anymore
 
   return (
     <>
-      <style>{`
+      <style jsx global>{`
         @keyframes slideUp {
           from {
             opacity: 0;
-            transform: translateY(15px);
+            transform: translateY(20px);
           }
           to {
             opacity: 1;
             transform: translateY(0);
-          }
-        }
-        
-        @keyframes pulse {
-          0%, 100% {
-            transform: scale(1);
-          }
-          50% {
-            transform: scale(1.05);
           }
         }
         
@@ -347,8 +364,20 @@ export default function ParkingPopup({
           animation: shimmer 2s infinite;
         }
         
+        .dark .skeleton {
+          background: linear-gradient(90deg, #374151 25%, #4b5563 50%, #374151 75%);
+          background-size: 1000px 100%;
+          animation: shimmer 2s infinite;
+        }
+        
         .glass-effect {
           background: rgba(255, 255, 255, 0.95);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+        }
+        
+        .dark .glass-effect {
+          background: rgba(17, 24, 39, 0.95);
           backdrop-filter: blur(20px);
           -webkit-backdrop-filter: blur(20px);
         }
@@ -373,12 +402,28 @@ export default function ParkingPopup({
           transform: translateX(3px);
         }
         
+        .dark .review-card:hover {
+          background: #374151;
+          border-left-color: #8b5cf6;
+        }
+        
         .image-zoom {
           transition: transform 0.4s ease;
         }
         
         .image-zoom:hover {
           transform: scale(1.03);
+        }
+
+        /* Remove white strip from mapbox popup */
+        .mapboxgl-popup-content {
+          background: transparent !important;
+          box-shadow: none !important;
+          border: none !important;
+        }
+        
+        .mapboxgl-popup-tip {
+          display: none !important;
         }
       `}</style>
 
@@ -397,18 +442,21 @@ export default function ParkingPopup({
           minWidth: '260px',
           padding: 0,
           borderRadius: '12px',
+          background: 'transparent',
+          border: 'none',
+          boxShadow: 'none',
         }}
         closeOnMove={false}
       >
         <div
-          className="glass-effect rounded-xl shadow-xl border border-white/20 overflow-hidden animate-slide-up"
+          className={`glass-effect rounded-xl shadow-xl border ${isDark ? 'border-gray-600' : 'border-white/20'} overflow-hidden animate-slide-up`}
           onMouseEnter={onMouseEnter}
           onMouseLeave={onMouseLeave}
         >
           {/* Close Button */}
           <button
             onClick={onClose}
-            className="absolute top-2 right-2 z-30 glass-effect hover:bg-red-50/90 text-gray-600 hover:text-red-600 rounded-full w-6 h-6 flex items-center justify-center transition-all duration-300 shadow-md border border-white/40 hover:scale-110"
+            className={`absolute top-2 right-2 z-30 glass-effect hover:bg-red-50/90 ${isDark ? 'hover:bg-red-900/50' : ''} ${isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-600'} rounded-full w-6 h-6 flex items-center justify-center transition-all duration-300 shadow-md ${isDark ? 'border-gray-600' : 'border-white/40'} hover:scale-110`}
             aria-label="Close popup"
           >
             <FaTimes className="text-xs" />
@@ -418,8 +466,8 @@ export default function ParkingPopup({
           <div className="absolute top-2 left-2 z-30 flex gap-1.5">
             <button
               onClick={() => setIsFavorite(!isFavorite)}
-              className={`glass-effect rounded-full w-6 h-6 flex items-center justify-center transition-all duration-300 shadow-md border border-white/40 hover:scale-110 ${
-                isFavorite ? 'text-red-500 bg-red-50/90' : 'text-gray-600 hover:text-red-500'
+              className={`glass-effect rounded-full w-6 h-6 flex items-center justify-center transition-all duration-300 shadow-md ${isDark ? 'border-gray-600' : 'border-white/40'} hover:scale-110 ${
+                isFavorite ? `text-red-500 ${isDark ? 'bg-red-900/50' : 'bg-red-50/90'}` : `${isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-500'}`
               }`}
               aria-label="Add to favorites"
             >
@@ -443,14 +491,14 @@ export default function ParkingPopup({
               <>
                 <button
                   onClick={prevImage}
-                  className="absolute left-1.5 top-1/2 transform -translate-y-1/2 glass-effect hover:bg-white text-gray-700 hover:text-gray-900 rounded-full w-5 h-5 flex items-center justify-center transition-all duration-300 shadow-md hover:scale-110"
+                  className={`absolute left-1.5 top-1/2 transform -translate-y-1/2 glass-effect ${isDark ? 'hover:bg-gray-700 text-gray-300 hover:text-gray-100' : 'hover:bg-white text-gray-700 hover:text-gray-900'} rounded-full w-5 h-5 flex items-center justify-center transition-all duration-300 shadow-md hover:scale-110`}
                   aria-label="Previous image"
                 >
                   <FaChevronLeft className="text-[8px]" />
                 </button>
                 <button
                   onClick={nextImage}
-                  className="absolute right-1.5 top-1/2 transform -translate-y-1/2 glass-effect hover:bg-white text-gray-700 hover:text-gray-900 rounded-full w-5 h-5 flex items-center justify-center transition-all duration-300 shadow-md hover:scale-110"
+                  className={`absolute right-1.5 top-1/2 transform -translate-y-1/2 glass-effect ${isDark ? 'hover:bg-gray-700 text-gray-300 hover:text-gray-100' : 'hover:bg-white text-gray-700 hover:text-gray-900'} rounded-full w-5 h-5 flex items-center justify-center transition-all duration-300 shadow-md hover:scale-110`}
                   aria-label="Next image"
                 >
                   <FaChevronRight className="text-[8px]" />
@@ -462,7 +510,7 @@ export default function ParkingPopup({
                     <div
                       key={idx}
                       className={`h-1 rounded-full transition-all duration-300 ${
-                        idx === currentImageIndex ? 'w-4 bg-white shadow-md' : 'w-1 bg-white/50 hover:bg-white/75'
+                        idx === currentImageIndex ? `w-4 ${isDark ? 'bg-gray-300' : 'bg-white'} shadow-md` : `w-1 ${isDark ? 'bg-gray-500' : 'bg-white/50'} ${isDark ? 'hover:bg-gray-400' : 'hover:bg-white/75'}`
                       }`}
                     ></div>
                   ))}
@@ -472,15 +520,17 @@ export default function ParkingPopup({
           </div>
 
           {/* Compact Rating and Price Section */}
-          <div className="px-2.5 pt-2 pb-1.5 flex items-center justify-between border-b border-gray-100">
-            {/* Rating Badge */}
-            <div className="flex items-center gap-1.5 px-2 py-1 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg border border-yellow-200">
+          <div className={`px-2.5 pt-2 pb-1.5 flex items-center justify-between border-b ${isDark ? 'border-gray-600' : 'border-gray-100'}`}>
+            {/* Rating Badge - Made Clickable */}
+            <button
+              onClick={() => setShowReviewsModal(true)}
+              className={`flex items-center gap-1.5 px-2 py-1 ${isDark ? 'bg-gradient-to-r from-yellow-900/50 to-orange-900/50 border-yellow-700' : 'bg-gradient-to-r from-yellow-50 to-orange-50 border-yellow-200'} rounded-lg border transition-all duration-200 hover:scale-[1.02] hover:shadow-md`}
+              aria-label={`View ${ratingCount} reviews for a rating of ${ratingAvg.toFixed(1)}`}
+            >
               <div className="flex items-center gap-0.5 text-[9px]">{getStars(ratingAvg)}</div>
-              <div className="text-[10px] text-gray-900 font-bold">
-                {Number.isFinite(ratingAvg) ? ratingAvg.toFixed(1) : '0.0'}
-              </div>
-              {ratingCount > 0 && <div className="text-[9px] text-gray-600 font-medium">({ratingCount})</div>}
-            </div>
+              <div className="text-[10px] font-bold dark:text-white">{Number.isFinite(ratingAvg) ? ratingAvg.toFixed(1) : '0.0'}</div>
+              {ratingCount > 0 && <div className="text-[9px] dark:text-gray-300 font-medium">({ratingCount})</div>}
+            </button>
 
             {/* Price Badge */}
             <div>
@@ -490,14 +540,14 @@ export default function ParkingPopup({
                     {discountPercent}% OFF
                   </div>
                   <div className="text-right">
-                    <div className="line-through text-gray-500 font-medium text-[9px]">{fmt(basePrice, 0)}</div>
-                    <div className="text-green-600 font-bold text-xs">{fmt(discountedPrice)}</div>
+                    <div className="line-through text-gray-500 dark:text-gray-400 font-medium text-[9px]">{fmt(basePrice, 0)}</div>
+                    <div className="text-green-600 dark:text-green-400 font-bold text-xs">{fmt(discountedPrice)}</div>
                   </div>
                 </div>
               ) : (
                 <div className="text-right">
-                  <div className="text-green-600 font-bold text-sm">{fmt(basePrice)}</div>
-                  <div className="text-[8px] text-gray-600 font-medium">per hour</div>
+                  <div className="text-green-600 dark:text-green-400 font-bold text-sm">{fmt(basePrice)}</div>
+                  <div className="text-[8px] dark:text-gray-300 font-medium">per hour</div>
                 </div>
               )}
             </div>
@@ -507,11 +557,11 @@ export default function ParkingPopup({
           <div className="p-2.5">
             {/* Title and Location */}
             <div className="mb-2">
-              <h3 className="font-bold text-gray-900 text-xs mb-1.5 leading-tight line-clamp-1 bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+              <h3 className="font-bold dark:text-white text-xs mb-1.5 leading-tight line-clamp-1 bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
                 {(space as any).title || 'Premium Parking Space'}
               </h3>
 
-              <div className="flex items-start text-gray-600 gap-1.5">
+              <div className="flex items-start text-gray-600 dark:text-gray-300 gap-1.5">
                 <div className="w-4 h-4 rounded-full bg-gradient-to-br from-red-400 to-pink-500 flex items-center justify-center flex-shrink-0 mt-0.5">
                   <FaMapMarkerAlt className="text-white text-[8px]" />
                 </div>
@@ -521,197 +571,129 @@ export default function ParkingPopup({
               </div>
             </div>
 
-            {/* Description */}
-            {(space as any).description && (
-              <div className="mb-2 p-2 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-100">
-                <p className="text-gray-700 text-[10px] leading-relaxed line-clamp-2">{(space as any).description}</p>
-              </div>
-            )}
-
-            {/* Reviews Section */}
-            {topComments.length > 0 ? (
-              <div className="mb-2">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-4 h-4 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center">
-                      <FaStar className="text-white text-[8px]" />
-                    </div>
-                    <span className="text-[10px] font-bold text-gray-800">Recent Reviews</span>
-                  </div>
-                  {reviews.length > 1 && (
-                    <button onClick={() => setShowReviewsModal(true)} className="text-[9px] font-semibold text-indigo-600 hover:text-indigo-700 transition-colors">
-                      View all ({reviews.length})
-                    </button>
-                  )}
-                </div>
-
-                <div className="space-y-1.5">
-                  {topComments.map((rev, idx) => (
-                    <div key={rev._id ?? idx} className="review-card p-2 bg-white rounded-lg shadow-sm border border-gray-100">
-                      <div className="flex items-start gap-2">
-                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center flex-shrink-0 shadow-sm">
-                          <FaUserCircle className="text-white text-sm" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between mb-0.5">
-                            <div className="font-semibold text-gray-900 text-[10px] truncate">
-                              {typeof rev.fromUser === 'string' ? rev.fromUser : rev.fromUser?.name || 'Anonymous'}
-                            </div>
-                            <div className="flex items-center gap-0.5 text-[8px] ml-1.5 flex-shrink-0">
-                              {getStars(rev.score ?? 0)}
-                            </div>
-                          </div>
-                          <div className="text-gray-600 text-[9px] leading-relaxed line-clamp-2">
-                            {rev.comment || <span className="italic text-gray-400">No comment</span>}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="mb-2 p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-center">
-                <FaStar className="text-gray-300 text-lg mx-auto mb-1" />
-                <p className="text-[9px] text-gray-500">No reviews yet</p>
-              </div>
-            )}
-          </div>
-
-          {/* Compact CTA Button */}
-          <div className="px-2.5 pb-2.5">
+            {/* Book Now Button - Moved up and now the primary element */}
             <button
               onClick={handleBookNow}
-              className="w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:via-purple-700 hover:to-pink-700 text-white py-2 px-3 rounded-xl font-bold text-xs shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-between group relative overflow-hidden hover-lift"
+              className="w-full p-3 rounded-xl text-white font-bold text-sm shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-[1.01] bg-gradient-to-r from-purple-600 to-pink-600 flex items-center justify-between"
             >
-              <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
-
-              <div className="flex items-center gap-2 relative z-10">
-                <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center">
-                  <FaCheck className="text-[9px]" />
-                </div>
-                <div className="text-left">
-                  <div className="font-bold text-[11px]">Book Now</div>
-                  {durationHours && totalAmount ? (
-                    <div className="text-[8px] opacity-90 font-medium">{Math.round(durationHours * 60) / 60}h</div>
-                  ) : (
-                    <div className="text-[8px] opacity-90 font-medium">Instant</div>
-                  )}
-                </div>
+              <div className="flex items-center gap-2">
+                <FaCheck className="text-lg" />
+                <span>Book Now</span>
+                {durationHours && <span className="text-xs font-normal">({durationHours.toFixed(1)} hrs)</span>}
               </div>
-
-              <div className="relative z-10">
-                <div className="text-sm font-black">{durationHours && totalAmount ? fmt(totalAmount, 0) : fmt(perHour, 0)}</div>
-                {!durationHours && <div className="text-[8px] opacity-90 font-medium">/hr</div>}
+              <div className="text-right">
+                <span className="text-lg">
+                  {totalAmount ? fmt(totalAmount, 0) : fmt(perHour, 0)}
+                </span>
+                <span className="text-xs font-normal">
+                  {totalAmount ? '' : '/hr'}
+                </span>
               </div>
             </button>
           </div>
-        </div>
-      </Popup>
 
-      {/* Enhanced Reviews Modal */}
-      {showReviewsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 animate-slide-up">
-          <div className="max-w-2xl w-full glass-effect rounded-3xl shadow-2xl p-6 border-2 border-white/20 max-h-[85vh] overflow-hidden flex flex-col">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg">
-                  <FaStar className="text-white text-lg" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-gray-900">All Reviews</h3>
-                  <p className="text-sm text-gray-600">{reviews.length} total reviews</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowReviewsModal(false)}
-                className="glass-effect hover:bg-red-50 text-gray-600 hover:text-red-600 rounded-full w-10 h-10 flex items-center justify-center transition-all duration-300 shadow-lg border border-white/40 hover:scale-110 hover:rotate-90"
-              >
-                <FaTimes className="text-lg" />
-              </button>
-            </div>
-
-            {/* Rating Summary */}
-            <div className="mb-6 p-5 bg-gradient-to-br from-yellow-50 to-orange-50 rounded-2xl border border-yellow-200">
-              <div className="flex items-center gap-6">
-                <div className="text-center">
-                  <div className="text-5xl font-black bg-gradient-to-r from-yellow-500 to-orange-500 bg-clip-text text-transparent">
-                    {Number.isFinite(ratingAvg) ? ratingAvg.toFixed(1) : '0.0'}
-                  </div>
-                  <div className="flex items-center justify-center gap-1 mt-2">{getStars(ratingAvg)}</div>
-                  <div className="text-xs text-gray-600 mt-1 font-medium">{ratingCount} ratings</div>
-                </div>
-                <div className="flex-1 text-sm text-gray-700">
-                  <div className="font-semibold mb-1">Customer Satisfaction</div>
-                  <div className="text-xs text-gray-600">Based on verified bookings and reviews</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Reviews List */}
-            <div className="space-y-4 overflow-y-auto pr-2 flex-1" style={{ maxHeight: 'calc(85vh - 320px)' }}>
-              {reviews.length === 0 && (
-                <div className="text-center py-12">
-                  <FaStar className="text-gray-300 text-5xl mx-auto mb-4" />
-                  <p className="text-sm text-gray-500">No reviews available yet.</p>
-                </div>
-              )}
-              {reviews.map((r, idx) => (
-                <div
-                  key={r._id ?? `${r.createdAt}-${idx}`}
-                  className="review-card p-5 bg-white rounded-2xl shadow-md border-2 border-gray-100 hover:shadow-xl transition-all duration-300"
-                >
-                  <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-400 via-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0 shadow-lg">
-                      <FaUserCircle className="text-white text-2xl" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-2">
-                        <div>
-                          <div className="font-bold text-gray-900 text-sm">
-                            {typeof r.fromUser === 'string' ? r.fromUser : r.fromUser?.name ?? 'Anonymous'}
-                          </div>
-                          <div className="text-xs text-gray-500 mt-0.5">
-                            {r.createdAt
-                              ? new Date(r.createdAt).toLocaleDateString('en-US', {
-                                  year: 'numeric',
-                                  month: 'short',
-                                  day: 'numeric',
-                                })
-                              : ''}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1 text-sm flex-shrink-0 ml-3">{getStars(r.score ?? 0)}</div>
-                      </div>
-                      <div className="text-sm text-gray-700 leading-relaxed">
-                        {r.comment || <span className="italic text-gray-400">No comment provided</span>}
-                      </div>
-                    </div>
-                  </div>
+          {/* Amenities Section - Removed to reduce size */}
+          {/* <div className={`p-2.5 border-t ${isDark ? 'border-gray-600' : 'border-gray-100'}`}>
+            <h4 className="text-xs font-bold dark:text-white mb-2">Amenities</h4>
+            <div className="grid grid-cols-3 gap-2">
+              {((space as any).amenities || []).map((amenity: string) => (
+                <div key={amenity} className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+                  {amenity === 'covered' && <FaUmbrella className="text-sm text-blue-500" />}
+                  {amenity === 'security' && <FaShieldAlt className="text-sm text-green-500" />}
+                  {amenity === 'ev_charging' && <FaBolt className="text-sm text-yellow-500" />}
+                  {amenity === 'handicap' && <FaWheelchair className="text-sm text-purple-500" />}
+                  {amenity === '24_7' && <FaClock className="text-sm text-indigo-500" />}
+                  {amenity === 'camera' && <FaVideo className="text-sm text-red-500" />}
+                  <span className="text-[10px] capitalize">{amenity.replace('_', ' ')}</span>
                 </div>
               ))}
             </div>
+          </div> */}
+        </div>
+      </Popup>
 
-            {/* Modal Footer */}
-            <div className="mt-6 pt-4 border-t border-gray-200 flex items-center justify-between">
-              <div className="text-xs text-gray-500">
-                <FaInfoCircle className="inline mr-1" />
-                Verified reviews only
-              </div>
+      {showReviewsModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setShowReviewsModal(false)}
+        >
+          <div
+            className={`glass-effect rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto ${isDark ? 'border-gray-600' : 'border-white/20'} border animate-slide-up`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 p-4 flex items-center justify-between border-b bg-white/90 dark:bg-gray-900/90 z-10">
+              <h3 className="text-lg font-bold dark:text-white">Customer Reviews ({ratingCount})</h3>
               <button
                 onClick={() => setShowReviewsModal(false)}
-                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-sm font-semibold transition-all duration-300 shadow-lg hover:shadow-xl hover-lift"
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                aria-label="Close reviews modal"
               >
-                Close
+                <FaTimes className="text-xl" />
               </button>
+            </div>
+
+            <div className="p-4">
+              {/* Summary */}
+              <div className={`p-4 mb-4 rounded-lg text-center ${isDark ? 'bg-gray-800/50' : 'bg-gray-50'} border ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
+                <div className="text-4xl font-extrabold text-yellow-500 mb-1">
+                  {Number.isFinite(ratingAvg) ? ratingAvg.toFixed(1) : '0.0'}
+                </div>
+                <div className="flex justify-center items-center gap-1 text-xl mb-2">
+                  {getStars(ratingAvg)}
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Based on {ratingCount} review{ratingCount !== 1 ? 's' : ''}
+                </p>
+              </div>
+
+              {/* Review List */}
+              <div className="space-y-4">
+                {reviews.length > 0 ? (
+                  reviews.map((review, index) => (
+                    <div
+                      key={review._id || index}
+                      className={`p-4 rounded-lg shadow-md ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} border`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <FaUserCircle className="text-gray-400 text-xl" />
+                          <span className="text-sm font-semibold dark:text-white">
+                            {typeof review.fromUser === 'object' && review.fromUser?.name ? review.fromUser.name : 'Anonymous'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-0.5 text-sm text-yellow-400">
+                          {getStars(review.score || 0)}
+                        </div>
+                      </div>
+                      <p className="text-gray-700 dark:text-gray-300 text-sm mb-2">
+                        {review.comment || 'No comment provided.'}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-500">
+                        {review.createdAt ? new Date(review.createdAt).toLocaleDateString() : 'Date unknown'}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center p-6 text-gray-500 dark:text-gray-400">
+                    <FaInfoCircle className="text-3xl mx-auto mb-2" />
+                    <p>No reviews have been submitted for this parking space yet.</p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Phone Verify Modal */}
-      {showPhoneModal && <PhoneVerifyModal open={showPhoneModal} onClose={() => setShowPhoneModal(false)} />}
+      {showPhoneModal && (
+        <PhoneVerifyModal
+          onClose={() => setShowPhoneModal(false)}
+          onSuccess={() => {
+            setShowPhoneModal(false);
+            handleBookNow({ stopPropagation: () => {} } as any); // Re-trigger booking after verification
+          }}
+        />
+      )}
     </>
   );
 }

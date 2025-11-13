@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+
 import Map, { Source, Layer, Marker } from "react-map-gl";
 import { toast } from "react-toastify";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -11,7 +12,7 @@ import {
   MdWarning,
   MdSchedule
 } from "react-icons/md";
-import { FaParking, FaMapMarkerAlt, FaExclamationTriangle } from "react-icons/fa";
+import { FaParking, FaMapMarkerAlt, FaExclamationTriangle, FaCar } from "react-icons/fa";
 import { useMapContext } from "../../context/MapContext";
 import axios from "axios";
 
@@ -34,6 +35,13 @@ export default function TrackNowPage() {
   const pollRef = useRef<number | null>(null);
   const warningRef = useRef<number | null>(null);
 
+  // NEW: refs and state for live tracking
+  const geoWatchIdRef = useRef<number | null>(null);
+  const lastRouteOriginRef = useRef<{ lat: number; lng: number } | null>(null);
+  const [trackCoords, setTrackCoords] = useState<[number, number][]>([]); // [lng, lat] pairs
+  const [headingDeg, setHeadingDeg] = useState<number | null>(null); // computed bearing for arrow rotation
+  const ROUTE_REFRESH_METERS = 30; // threshold to refetch directions
+
   // Accept both `otp` and `firstOtp` because different places might use either name
   const { bookingId, parkingSpace, otp: otpFromState, firstOtp: firstOtpFromState, expiresAt } = (location.state || {}) as any;
   const base = import.meta.env.VITE_BASE_URL;
@@ -55,22 +63,54 @@ export default function TrackNowPage() {
 
     // Fetch user location
     if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
+      // start continuous location tracking (watchPosition)
+      const watchId = navigator.geolocation.watchPosition(
         (position) => {
           const { latitude, longitude } = position.coords;
           setCurrentLocation({ lat: latitude, lng: longitude });
-          setViewport({ ...viewport, latitude, longitude });
 
-          if (parkingSpace) {
-            const [destLng, destLat] = parkingSpace.location.coordinates;
-            fetchRoute(latitude, longitude, destLat, destLng);
+          // update viewport to follow user (keeps existing viewport props)
+          setViewport((vp) => ({ ...vp, latitude, longitude }));
+
+          // append to actual traveled path (as [lng, lat])
+          setTrackCoords((prev) => {
+            const next = [...prev, [longitude, latitude]];
+            if (next.length > 1000) next.shift(); // keep sane length
+            // compute heading if at least two points
+            if (next.length >= 2) {
+              const lastIdx = next.length - 1;
+              const [lng1, lat1] = next[lastIdx - 1];
+              const [lng2, lat2] = next[lastIdx];
+              const bearing = computeBearing(lat1, lng1, lat2, lng2);
+              setHeadingDeg(bearing);
+            }
+            return next;
+          });
+
+          // throttle route fetch by distance
+          const last = lastRouteOriginRef.current;
+          if (!last || distanceMeters(last.lat, last.lng, latitude, longitude) > ROUTE_REFRESH_METERS) {
+            lastRouteOriginRef.current = { lat: latitude, lng: longitude };
+            if (parkingSpace) {
+              const [destLng, destLat] = parkingSpace.location.coordinates;
+              fetchRoute(latitude, longitude, destLat, destLng);
+            }
           }
         },
         (error) => {
           console.error("Location error:", error);
           toast.error("Could not get your location.");
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 1000,
+          timeout: 10000,
         }
       );
+
+      geoWatchIdRef.current = watchId as number;
+    } else {
+      toast.error("Geolocation not supported by your browser.");
     }
 
     const fetchBooking = async () => {
@@ -111,6 +151,12 @@ export default function TrackNowPage() {
       if (pollRef.current) window.clearInterval(pollRef.current);
       if (intervalRef.current) window.clearInterval(intervalRef.current);
       if (warningRef.current) window.clearInterval(warningRef.current);
+
+      // clear geolocation watch
+      if (geoWatchIdRef.current !== null && navigator.geolocation && navigator.geolocation.clearWatch) {
+        navigator.geolocation.clearWatch(geoWatchIdRef.current);
+        geoWatchIdRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
@@ -210,6 +256,36 @@ export default function TrackNowPage() {
       console.error("Failed to fetch route:", error);
     }
   };
+
+  // Haversine helper to compute meters between two lat/lng points
+  function distanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const R = 6371000;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  // compute bearing (degrees) from lat1/lon1 to lat2/lon2
+  function computeBearing(lat1: number, lon1: number, lat2: number, lon2: number) {
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const toDeg = (rad: number) => (rad * 180) / Math.PI;
+    const φ1 = toRad(lat1);
+    const φ2 = toRad(lat2);
+    const λ1 = toRad(lon1);
+    const λ2 = toRad(lon2);
+    const y = Math.sin(λ2 - λ1) * Math.cos(φ2);
+    const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(λ2 - λ1);
+    const θ = Math.atan2(y, x);
+    let bearing = (toDeg(θ) + 360) % 360;
+    // Mapbox rotation: 0 = north pointing up. We'll use bearing directly.
+    return bearing;
+  }
 
   const formatTime = (ms: number | null) => {
     if (ms === null) return "--:--:--";
@@ -317,6 +393,14 @@ export default function TrackNowPage() {
         <div className="absolute inset-0 bg-red-500/5 animate-pulse z-0 pointer-events-none" />
       )}
       
+      {/* Live badge - visible when we have a watch id running */}
+      {geoWatchIdRef.current !== null && (
+        <div className="absolute top-24 left-6 z-30 flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-red-500 animate-ping" />
+          <div className="px-3 py-1 rounded-full bg-white/90 text-sm font-semibold shadow">Live</div>
+        </div>
+      )}
+
       <div className="relative h-full">
         <Map
           {...viewport}
@@ -325,13 +409,55 @@ export default function TrackNowPage() {
           style={{ width: "100%", height: "100%" }}
           mapStyle="mapbox://styles/mapbox/streets-v11"
         >
-          {/* Current Location Marker */}
+          {/* Actual tracked path (user's real route) */}
+          {trackCoords.length > 1 && (
+            <Source
+              id="track"
+              type="geojson"
+              data={{
+                type: "Feature",
+                geometry: {
+                  type: "LineString",
+                  coordinates: trackCoords,
+                },
+              }}
+            >
+              <Layer
+                id="track-line"
+                type="line"
+                layout={{ "line-cap": "round", "line-join": "round" }}
+                paint={{
+                  "line-width": 4,
+                  "line-opacity": 0.9,
+                  "line-color": "#1f8ef1"
+                }}
+              />
+            </Source>
+          )}
+
+          {/* Current Location Marker with arrow heading */}
           {currentLocation && (
-            <Marker latitude={currentLocation.lat} longitude={currentLocation.lng}>
-              <div className="relative">
-                <div className="absolute inset-0 bg-blue-500 rounded-full animate-ping opacity-20" />
-                <div className="relative bg-gradient-to-br from-blue-500 to-blue-600 text-white p-2 rounded-full shadow-2xl border-2 border-white">
-                  <MdGpsFixed size={20} />
+            <Marker latitude={currentLocation.lat} longitude={currentLocation.lng} anchor="center">
+              <div className="relative w-12 h-12 flex items-center justify-center">
+                {/* subtle pulsing circle behind */}
+                <div className="absolute w-10 h-10 rounded-full bg-blue-500 opacity-20 animate-ping" />
+                {/* circle base */}
+                <div className="absolute w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 text-white p-2 shadow-2xl border-2 border-white flex items-center justify-center">
+                  {/* Arrow icon: rotate by headingDeg if available */}
+                  {/* react-icon car, rotated by heading */}
+<div
+  style={{
+    transform: `rotate(${headingDeg ?? 0}deg)`,
+    transition: "transform 300ms linear",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center"
+  }}
+>
+  <FaCar size={20} className="text-white" />
+</div>
+
+
                 </div>
               </div>
             </Marker>

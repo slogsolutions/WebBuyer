@@ -1,3 +1,24 @@
+/**
+ * @openapi
+ * tags:
+ *   - name: Device Tokens
+ *
+ * /api/users/save-token:
+ *   post:
+ *     tags: [Device Tokens]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Save a user FCM token
+ *
+ * /api/users/delete-token:
+ *   post:
+ *     tags: [Device Tokens]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Delete a user FCM token
+ */
+
+
 import express from "express";
 import { protect } from "../middleware/auth.js";
 import { saveToken, deleteToken } from "../controllers/userToken.js";

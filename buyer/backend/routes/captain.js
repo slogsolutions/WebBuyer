@@ -1,3 +1,25 @@
+/**
+ * @openapi
+ * tags:
+ *   - name: Captain
+ *     description: Captain review & approval workflow
+ *
+ * /api/captain/parkingspaces:
+ *   get:
+ *     tags: [Captain]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Get parking spaces to review
+ *
+ * /api/captain/parkingspaces/{id}/status:
+ *   patch:
+ *     tags: [Captain]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Approve or reject a parking space
+ */
+
+
 import express from 'express';
 import { protect } from '../middleware/auth.js';
 import { captainOnly } from '../middleware/roles.js';

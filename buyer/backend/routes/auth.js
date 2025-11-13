@@ -1,3 +1,55 @@
+/**
+ * @openapi
+ * tags:
+ *   - name: Auth
+ *     description: User authentication and account management
+ *
+ * /api/auth/register:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Register a new user account
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/AuthRegisterRequest'
+ *     responses:
+ *       201:
+ *         description: User registered successfully
+ *       400:
+ *         description: Validation error
+ *
+ * /api/auth/login:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Login and get JWT token
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/AuthLoginRequest'
+ *     responses:
+ *       200:
+ *         description: Login success, returns JWT token
+ *
+ * /api/auth/me:
+ *   get:
+ *     tags: [Auth]
+ *     summary: Get authenticated user profile
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Authenticated user object
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/User'
+ */
+
+
 import express from 'express';
 import { body } from 'express-validator';
  // use your auth middleware

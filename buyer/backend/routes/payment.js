@@ -1,3 +1,25 @@
+/**
+ * @openapi
+ * tags:
+ *   - name: Payment
+ *     description: Razorpay Payment Flow
+ *
+ * /api/payment/initiate-payment:
+ *   post:
+ *     tags: [Payment]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Create Razorpay order
+ *
+ * /api/payment/verify-payment:
+ *   post:
+ *     tags: [Payment]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Verify payment and update booking
+ */
+
+
 // backend/routes/payment.js
 import express from 'express';
 import Razorpay from 'razorpay';

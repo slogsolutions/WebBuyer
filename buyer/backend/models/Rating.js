@@ -1,39 +1,4 @@
-// // backend/models/Rating.js
-// import mongoose from 'mongoose';
 
-// const ratingSchema = new mongoose.Schema({
-//   booking: {
-//     type: mongoose.Schema.Types.ObjectId,
-//     ref: 'parkfindersecondBooking',
-//     required: true,
-//   },
-//   fromUser: {
-//     type: mongoose.Schema.Types.ObjectId,
-//     ref: 'ParkFinderSecondUser',
-//     required: true,
-//   },
-//   toUser: {
-//     type: mongoose.Schema.Types.ObjectId,
-//     ref: 'ParkFinderSecondUser',
-//     required: true,
-//   },
-//   score: {
-//     type: Number,
-//     required: true,
-//     min: 1,
-//     max: 5,
-//   },
-//   comment: {
-//     type: String,
-//     default: '',
-//   },
-//   createdAt: {
-//     type: Date,
-//     default: Date.now,
-//   },
-// });
-
-// export default mongoose.models.Rating || mongoose.model('Rating', ratingSchema);
 // backend/models/Rating.js
 import mongoose from 'mongoose';
 

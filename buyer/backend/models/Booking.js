@@ -40,6 +40,8 @@ const bookingSchema = new mongoose.Schema({
     required: true,
     default: 0,
   },
+  sellerRatedBuyer: { type: Boolean, default: false },
+
   vehicleNumber: String,
   vehicleType: String,
   vehicleModel: String,
@@ -109,6 +111,15 @@ const bookingSchema = new mongoose.Schema({
     type: refundSchema,
     default: () => ({}),
   },
+    buyerRatedSeller: {
+    type: Boolean,
+    default: false,
+  },
+  sellerRatedBuyer: {
+    type: Boolean,
+    default: false,
+  },
+
 
   createdAt: {
     type: Date,

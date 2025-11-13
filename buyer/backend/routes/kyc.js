@@ -1,3 +1,39 @@
+/**
+ * @openapi
+ * tags:
+ *   - name: KYC
+ *     description: KYC Verification APIs
+ *
+ * /api/kyc:
+ *   post:
+ *     tags: [KYC]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Submit KYC documents
+ *
+ * /api/kyc/status:
+ *   get:
+ *     tags: [KYC]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Get your KYC status
+ *
+ * /api/kyc/admin:
+ *   get:
+ *     tags: [KYC]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Admin - Get all KYC submissions
+ *
+ * /api/kyc/admin/approve/{selectedKycId}:
+ *   post:
+ *     tags: [KYC]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Admin - Approve a KYC submission
+ */
+
+
 import express from 'express';
 import { adminOnly, protect } from '../middleware/auth.js';
 import { submitKYC, getKYCStatus, getAllKYCSubmissions,approveKYCSubmission} from '../controllers/kyc.js';

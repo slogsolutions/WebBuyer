@@ -1,3 +1,17 @@
+/**
+ * @openapi
+ * tags:
+ *   - name: Stats
+ *
+ * /api/stats/me:
+ *   get:
+ *     tags: [Stats]
+ *     security:
+ *       - bearerAuth: []
+ *     summary: Get stats for the logged-in user
+ */
+
+
 // server/routes/stats.js
 import express from 'express';
 import { getMyStats } from '../controllers/stats.js';
